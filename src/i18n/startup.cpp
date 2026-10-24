@@ -72,7 +72,7 @@ constexpr std::string_view kEnglish = R"JSON({
   "sandbox.help.read_paths":  { "text": "extra paths a command may read, beyond the scope above · for a dependency outside the workspace", "width_hint": 94 },
   "sandbox.help.write_paths": { "text": "separate from readable on purpose: granting write is a different decision", "width_hint": 72 },
   "sandbox.help.deny_paths":  { "text": "carved out even inside the scope above · e.g. ~/.cargo/credentials. credential files are masked anyway.", "width_hint": 102 },
-  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · 53 dns. forgetting 53 breaks everything.", "width_hint": 74 },
+  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · TCP only", "width_hint": 74 },
   "sandbox.help.memory":      { "text": "0 = no cap", "width_hint": 10 },
   "sandbox.help.procs":       { "text": "0 = no cap · stops fork bombs", "width_hint": 29 },
   "sandbox.help.scan_depth":  { "text": "0 = workspace root only · 3 finds services/*/.env · each level costs stat() calls on every command", "width_hint": 97 },

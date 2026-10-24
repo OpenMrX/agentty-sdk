@@ -78,7 +78,7 @@ inline constexpr std::string_view kChineseSimplified = R"JSON({
   "sandbox.help.read_paths":  { "text": "命令可读取的额外路径，超出上面的范围设置 · 用于工作区之外的依赖" },
   "sandbox.help.write_paths": { "text": "与可读分开是有意为之：授予写入是另一个决定" },
   "sandbox.help.deny_paths":  { "text": "即使在上面的范围内也会排除 · 例如 ~/.cargo/credentials。凭据文件本来就会被屏蔽。" },
-  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · 53 dns。忘记 53 会导致一切中断。" },
+  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · TCP only" },
   "sandbox.help.memory":      { "text": "0 = 不限制" },
   "sandbox.help.procs":       { "text": "0 = 不限制 · 可阻止 fork 炸弹" },
   "sandbox.help.scan_depth":  { "text": "0 = 仅工作区根目录 · 3 可找到 services/*/.env · 每增加一层都会让每条命令多出 stat() 调用" },

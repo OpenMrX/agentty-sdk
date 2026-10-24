@@ -64,7 +64,7 @@ inline constexpr std::string_view kFrench = R"JSON({
   "sandbox.help.read_paths":  { "text": "chemins supplémentaires qu'une commande peut lire, au-delà de la portée ci-dessus · pour une dépendance hors de l'espace de travail" },
   "sandbox.help.write_paths": { "text": "séparé de la lecture à dessein : accorder l'écriture est une autre décision" },
   "sandbox.help.deny_paths":  { "text": "exclus même dans la portée ci-dessus · p. ex. ~/.cargo/credentials. les identifiants sont masqués de toute façon." },
-  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · 53 dns. oublier le 53 casse tout." },
+  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · TCP only" },
   "sandbox.help.memory":      { "text": "0 = sans limite" },
   "sandbox.help.procs":       { "text": "0 = sans limite · arrête les fork bombs" },
   "sandbox.help.scan_depth":  { "text": "0 = uniquement la racine · 3 trouve services/*/.env · chaque niveau coûte des appels stat() à chaque commande" },

@@ -359,8 +359,8 @@ form::Form build_sandbox_form(const sandbox_cfg::Config& cfg,
         {"shares the host network \xc2\xb7 git push and npm install work, and so "
          "does exfiltration",
          "an empty network namespace \xc2\xb7 nothing can connect out",
-         "only the TCP ports listed below \xc2\xb7 UDP and ICMP are not filtered "
-         "\xc2\xb7 needs landlock abi 4+"}));
+         "only outgoing TCP to the ports below \xc2\xb7 DNS and other UDP are "
+         "not filtered \xc2\xb7 no listening sockets \xc2\xb7 needs landlock abi 4+"}));
     // Per-port needs landlock abi 4. Below that the kernel cannot express it,
     // so say so on the row rather than accepting a setting that silently
     // degrades to Full.
@@ -387,10 +387,12 @@ form::Form build_sandbox_form(const sandbox_cfg::Config& cfg,
     // ports when Access is not `ports` switches it, because adding a port is
     // an unambiguous statement of intent. The help line says so rather than
     // leaving it to be discovered.
-    if (cfg.net_mode != sandbox_cfg::NetMode::Ports)
+    if (cfg.net_mode == sandbox_cfg::NetMode::Full)
         form.fields.back().help =
             "adding a port here switches Access to `ports` \xc2\xb7 "
-            "443 https \xc2\xb7 80 http \xc2\xb7 22 git-ssh \xc2\xb7 53 dns";
+            "443 https \xc2\xb7 80 http \xc2\xb7 22 git-ssh";
+    else if (cfg.net_mode == sandbox_cfg::NetMode::None)
+        form.fields.back().help = "only used when Access is `ports`";
 
     // ── Syscalls ─────────────────────────────────────────────────────────
     form.fields.push_back(header("Syscalls"));

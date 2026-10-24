@@ -71,7 +71,7 @@ inline constexpr std::string_view kGerman = R"JSON({
   "sandbox.help.read_paths":  { "text": "zusätzliche Pfade, die ein Befehl lesen darf, über den obigen Bereich hinaus · für Abhängigkeiten außerhalb des Arbeitsbereichs" },
   "sandbox.help.write_paths": { "text": "bewusst getrennt vom Lesen: Schreibrechte sind eine andere Entscheidung" },
   "sandbox.help.deny_paths":  { "text": "auch innerhalb des obigen Bereichs ausgenommen · z. B. ~/.cargo/credentials. Zugangsdaten werden ohnehin maskiert." },
-  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · 53 dns. 53 zu vergessen bricht alles." },
+  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · TCP only" },
   "sandbox.help.memory":      { "text": "0 = keine Grenze" },
   "sandbox.help.procs":       { "text": "0 = keine Grenze · stoppt Fork-Bomben" },
   "sandbox.help.scan_depth":  { "text": "0 = nur das Wurzelverzeichnis · 3 findet services/*/.env · jede Ebene kostet stat()-Aufrufe bei jedem Befehl" },

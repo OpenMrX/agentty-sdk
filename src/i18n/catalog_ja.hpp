@@ -67,7 +67,7 @@ inline constexpr std::string_view kJapanese = R"JSON({
   "sandbox.help.read_paths":  { "text": "上の範囲設定に加えてコマンドが読み取れるパス · ワークスペース外の依存関係のため" },
   "sandbox.help.write_paths": { "text": "読み取りとは意図的に分けています。書き込みの許可は別の判断です" },
   "sandbox.help.deny_paths":  { "text": "上の範囲内でも除外されます · 例 ~/.cargo/credentials。認証情報はいずれにせよマスクされます" },
-  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · 53 dns。53 を忘れるとすべて壊れます" },
+  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · TCP only" },
   "sandbox.help.memory":      { "text": "0 = 制限なし" },
   "sandbox.help.procs":       { "text": "0 = 制限なし · fork 爆弾を止めます" },
   "sandbox.help.scan_depth":  { "text": "0 = ワークスペース直下のみ · 3 で services/*/.env を検出 · 階層ごとに各コマンドで stat() が増えます" },

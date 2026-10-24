@@ -739,23 +739,15 @@ Cmd sandbox_update(Model& m, msg::SandboxMsg sm) {
                 cfg.allow_ports.erase(
                     std::unique(cfg.allow_ports.begin(), cfg.allow_ports.end()),
                     cfg.allow_ports.end());
-                // Adding a port is an unambiguous statement of intent, so it
-                // sets the mode rather than sitting inert under `full` or
-                // `none`. The row's help says this will happen.
-                //
-                // And the inverse: emptying the list under `ports` would be a
-                // policy that denies everything, which is never what deleting
-                // the last port meant -- fall back to the default rather than
-                // leaving a trap.
-                // Only when the Access row can actually say `ports`: on a host
-                // without landlock abi 4 it is locked, and switching it would
-                // save a mode that falls back to full network.
+                // Switch Access only when the list actually changed, and never
+                // loosen `none` or open the network because a list was emptied.
+                const auto before = o->pane.working.allow_ports;
+                const bool changed = cfg.allow_ports != before;
                 const bool ports_ok = o->pane.facts.claybin_available
                                       && o->pane.facts.landlock_abi >= 4;
-                if (!cfg.allow_ports.empty() && ports_ok)
+                if (changed && !cfg.allow_ports.empty() && ports_ok
+                    && cfg.net_mode == sandbox_cfg::NetMode::Full)
                     cfg.net_mode = sandbox_cfg::NetMode::Ports;
-                else if (cfg.net_mode == sandbox_cfg::NetMode::Ports)
-                    cfg.net_mode = sandbox_cfg::NetMode::Full;
             } else if (row_id == pn::kSbReadPaths) {
                 cfg.read_paths = values;
             } else if (row_id == pn::kSbWritePaths) {

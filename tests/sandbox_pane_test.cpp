@@ -1289,10 +1289,10 @@ TEST_CASE("sandbox pane: adding a port switches Access to `ports`") {
     CHECK(o->pane.working.allow_ports == want);
 }
 
-TEST_CASE("sandbox pane: emptying the port list leaves `ports` mode") {
-    // The inverse, and it matters more: `ports` with an empty list is a policy
-    // that denies ALL network, which is never what deleting the last port
-    // meant. Falling back to the default beats leaving a trap.
+TEST_CASE("sandbox pane: emptying the port list does not open the network") {
+    // It used to jump to `full`, which silently turned "allow these ports"
+    // into "allow everything". Now it stays on `ports` (deny all) and the
+    // row's error says so.
     sandbox_cfg::Config cfg;
     cfg.configured = true;
     cfg.backend = sandbox_cfg::LinuxBackend::Claybin;
@@ -1316,7 +1316,37 @@ TEST_CASE("sandbox pane: emptying the port list leaves `ports` mode") {
     const auto* o = m2.ui.panel.get<pn::Sandbox>();
     REQUIRE(o != nullptr);
     CHECK(o->pane.working.allow_ports.empty());
-    CHECK(o->pane.working.net_mode != sandbox_cfg::NetMode::Ports);
+    CHECK(o->pane.working.net_mode != sandbox_cfg::NetMode::Full);
+}
+
+TEST_CASE("sandbox pane: editing ports never loosens Access = none") {
+    sandbox_cfg::Config cfg;
+    cfg.configured = true;
+    cfg.backend = sandbox_cfg::LinuxBackend::Claybin;
+    cfg.net_mode = sandbox_cfg::NetMode::None;
+    cfg.allow_ports.clear();
+    install(cfg);
+
+    Model m = opened();
+    auto [m1, _] = app::update(std::move(m),
+                               Msg{SandboxEditList{std::string{pn::kSbPorts}}});
+    m = std::move(m1);
+    {
+        auto* ed = m.ui.panel.get<pn::SandboxList>();
+        REQUIRE(ed != nullptr);
+        std::get<form::field::Text>(ed->pane.form.fields.back().value).value = "443";
+    }
+    auto [m2, __] = app::update(std::move(m), Msg{SandboxListClose{}});
+    const auto* o = m2.ui.panel.get<pn::Sandbox>();
+    REQUIRE(o != nullptr);
+    CHECK(o->pane.working.net_mode == sandbox_cfg::NetMode::None);
+}
+
+TEST_CASE("sandbox list: a bad port is flagged while typing") {
+    auto ed = pn::build_sandbox_list(pn::kSbPorts, "t", "h", {"443", "8O80"}, true);
+    pn::renumber_sandbox_list(ed);
+    CHECK(ed.form.fields[0].help.empty());
+    CHECK(ed.form.fields[1].help.find("not a port") != std::string::npos);
 }
 
 TEST_CASE("sandbox pane: the form teaches itself") {

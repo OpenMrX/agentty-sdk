@@ -58,7 +58,7 @@ inline constexpr std::string_view kSpanish = R"JSON({
   "sandbox.help.read_paths":  { "text": "rutas adicionales que un comando puede leer, más allá del alcance de arriba · para dependencias fuera del espacio de trabajo" },
   "sandbox.help.write_paths": { "text": "separado de la lectura a propósito: conceder escritura es otra decisión" },
   "sandbox.help.deny_paths":  { "text": "excluidos incluso dentro del alcance de arriba · p. ej. ~/.cargo/credentials. las credenciales se ocultan igualmente." },
-  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · 53 dns. olvidar el 53 lo rompe todo." },
+  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · TCP only" },
   "sandbox.help.memory":      { "text": "0 = sin límite" },
   "sandbox.help.procs":       { "text": "0 = sin límite · detiene las fork bombs" },
   "sandbox.help.scan_depth":  { "text": "0 = solo la raíz del espacio de trabajo · 3 encuentra services/*/.env · cada nivel cuesta llamadas a stat() en cada comando" },

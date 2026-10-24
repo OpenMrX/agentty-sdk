@@ -73,7 +73,7 @@ inline constexpr std::string_view kRussian = R"JSON({
   "sandbox.help.read_paths":  { "text": "дополнительные пути, которые команда может читать, сверх области выше · для зависимостей вне рабочей папки" },
   "sandbox.help.write_paths": { "text": "намеренно отделено от чтения: доступ на запись — отдельное решение" },
   "sandbox.help.deny_paths":  { "text": "исключено даже внутри области выше · напр. ~/.cargo/credentials. учётные данные скрываются в любом случае." },
-  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · 53 dns. забыть 53 — сломать всё." },
+  "sandbox.help.ports":       { "text": "443 https · 80 http · 22 git-ssh · TCP only" },
   "sandbox.help.memory":      { "text": "0 = без ограничения" },
   "sandbox.help.procs":       { "text": "0 = без ограничения · останавливает fork-бомбы" },
   "sandbox.help.scan_depth":  { "text": "0 = только корень рабочей папки · 3 находит services/*/.env · каждый уровень стоит вызовов stat() на каждой команде" },

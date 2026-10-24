@@ -1582,8 +1582,8 @@ int run_main(int argc, char** argv, const maya::unlocked& cap) {
     }
 
     // ── Bash / diagnostics sandbox ──────────────────────────────────────
-    // Wraps shell commands in bwrap (Linux) or sandbox-exec (macOS) so an
-    // approved bash call can't read ~/.ssh, write /etc, or `rm -rf ~`.
+    // Wraps shell commands in claybin (sandbox-exec as the macOS fallback) so
+    // an approved bash call can't read ~/.ssh, write /etc, or `rm -rf ~`.
     // `auto` (default): use if available, log warning otherwise. `on`:
     // fail loud if the backend is missing — for users who'd rather not
     // run unsandboxed at all. `off`: explicit opt-out for environments
@@ -1733,8 +1733,8 @@ int run_main(int argc, char** argv, const maya::unlocked& cap) {
                              "credentials.",
                              ui::fg_bold(warn)),
                         text(""),
-                        text("Re-enable with  --sandbox auto  "
-                             "or via Ctrl+K \xe2\x86\x92 Settings \xe2\x86\x92 Sandbox.",
+                        text("Re-enable by starting agentty without  --sandbox off  "
+                             "(the Settings pane can't turn it back on).",
                              ui::fg_dim(ui::muted)));
             // render_to_string_ansi, not maya::print: print() writes to
             // STDOUT, and `agentty run` callers parse stdout. A banner there
