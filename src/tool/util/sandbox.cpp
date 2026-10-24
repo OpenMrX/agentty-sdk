@@ -381,9 +381,23 @@ constexpr const char* kHomeToolSubdirsWin[] = {
         p.system_read_roots.emplace_back("/");
     }
 #endif
-    // Whatever the user added on top.
-    for (const auto& r : cfg.read_paths) p.read_paths.push_back(r);
-    for (const auto& w : cfg.write_paths) p.write_paths.push_back(w);
+    // Whatever the user added on top, made absolute (claybin ignores `~` and
+    // relative paths).
+    p.workspace = workspace_root().string();
+    {
+#if defined(_WIN32)
+        const char* h = std::getenv("USERPROFILE");
+#else
+        const char* h = std::getenv("HOME");
+#endif
+        const std::string_view home = h ? h : "";
+        for (const auto& r : cfg.read_paths)
+            if (auto a = sandbox_cfg::resolve_user_path(r, p.workspace, home); !a.empty())
+                p.read_paths.push_back(std::move(a));
+        for (const auto& w : cfg.write_paths)
+            if (auto a = sandbox_cfg::resolve_user_path(w, p.workspace, home); !a.empty())
+                p.write_paths.push_back(std::move(a));
+    }
 
     p.workspace = workspace_root().string();
     p.cwd = p.workspace;

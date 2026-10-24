@@ -111,8 +111,8 @@ enum class SyscallMode : std::uint8_t {
     // clone's namespace flags by ARGUMENT; W^X on mmap/mprotect; ioctl reduced
     // to an allow-list that excludes the TIOCSTI keystroke-injection family.
     Compiler,
-    // profiles::with_filesystem() -- no subprocess creation. Breaks any build
-    // that shells out, which is most of them. For read-only analysis runs.
+    // Compiler minus the socket calls when Access is none. (It used to be
+    // with_filesystem(), which has no execve and could not run a shell.)
     Strict,
 };
 
@@ -529,6 +529,12 @@ struct Config {
 // so this stays pure and testable without touching a real home directory.
 [[nodiscard]] std::vector<std::string> mask_paths(
     const Config& cfg, std::string_view workspace, std::string_view home);
+
+// A path the user typed, made absolute: `~` and `~/x` expand to home,
+// relative paths resolve against the workspace, a trailing `/` is dropped.
+// Empty when it can't be resolved (e.g. `~` with no home).
+[[nodiscard]] std::string resolve_user_path(std::string_view path, std::string_view workspace,
+                                            std::string_view home);
 
 // ── Postures ───────────────────────────────────────────────────
 

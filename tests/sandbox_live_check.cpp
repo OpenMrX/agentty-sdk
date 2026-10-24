@@ -177,6 +177,33 @@ int main() {
     // reason is the failure mode this harness has already hit twice.
     agentty::tools::util::set_workspace_root(::agentty::IoAccess::grant(), kWorkspace);
 
+    // ── Strict still runs a shell, and W^X applies with the filter off ──
+    // Strict used to map to with_filesystem(), which has no execve, so the
+    // Hardened and Airgapped presets failed every command.
+    std::printf("syscall_mode=Strict runs a command:\n");
+    for (int net : {0, 1}) {
+        auto p = base_posture();
+        p.syscall_mode = 2;
+        p.net_mode = net;
+        std::string out;
+        const int rc = run(p, "echo strict-ok", out);
+        expect(rc == 0 && out.find("strict-ok") != std::string::npos,
+               net ? "strict + no network runs echo" : "strict + network runs echo");
+    }
+    std::printf("W^X with the filter off:\n");
+    {
+        auto p = base_posture();
+        p.syscall_mode = 0;
+        p.wx_protect = true;
+        std::string out;
+        run(p, "python3 -c 'import mmap; mmap.mmap(-1,4096,prot=7); print(\"MAPPED\")' 2>&1", out);
+        expect(out.find("PermissionError") != std::string::npos, "an RWX mapping is refused");
+        p.wx_protect = false;
+        out.clear();
+        run(p, "python3 -c 'import mmap; mmap.mmap(-1,4096,prot=7); print(\"MAPPED\")' 2>&1", out);
+        expect(out.find("PermissionError") == std::string::npos, "W^X off allows an RWX mapping");
+    }
+
     // ── 1. realloc under the compiler profile ────────────────────────
     // The regression: mremap was absent from base(), so realloc() of a large
     // block returned NULL and curl reported "out of memory" on a machine with
@@ -516,6 +543,34 @@ int main() {
             // main.cpp would pass the test above and break every build.
             expect(r.output.find("int main") != std::string::npos,
                    "an ordinary workspace file is still readable");
+        }
+
+        // The Hardened preset must still run a command (Strict once had no
+        // execve), and a `~/` read path must grant what it names.
+        if (sb::is_active()) {
+            const char* home = std::getenv("HOME");
+            const std::string dir = std::string{home ? home : "/tmp"} + "/.agentty-live-read";
+            std::filesystem::create_directories(dir);
+            if (std::FILE* f = std::fopen((dir + "/x").c_str(), "w")) {
+                std::fputs("tilde-read-ok\n", f);
+                std::fclose(f);
+            }
+            sb::reset_config_for_test();
+            auto hard = agentty::sandbox_cfg::apply_posture(
+                agentty::sandbox_cfg::Config{}, agentty::sandbox_cfg::Posture::Hardened);
+            hard.configured = true;
+            hard.fs_scope = agentty::sandbox_cfg::FsScope::Minimal;
+            hard.read_paths = {"~/.agentty-live-read"};
+            sb::set_config(hard);
+            sb::init(sb::Mode::On);
+            auto r = sb::run_shell_command("cat ~/.agentty-live-read/x",
+                                           64 * 1024, std::chrono::seconds{30});
+            expect(r.output.find("tilde-read-ok") != std::string::npos,
+                   "Hardened runs a command and a ~/ read path is granted");
+            std::filesystem::remove_all(dir);
+            sb::reset_config_for_test();
+            sb::set_config(agentty::sandbox_cfg::Config{});
+            sb::init(sb::Mode::Auto);
         }
 
         // ── why the handoff gate cannot be a sandbox wall ───────────────

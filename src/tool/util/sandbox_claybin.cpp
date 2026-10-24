@@ -235,10 +235,29 @@ using namespace ::clay::literals;
             // outright, and the settings pane's live preview caught that the
             // first time it ran.
             case 0: return SyscallPolicy::everything();
-            case 2: return profiles::with_filesystem();
+            // Strict is compiler() when there is no network, so a shell can
+            // still exec. with_filesystem() has no execve and killed every
+            // command. With network on it needs the socket calls.
+            case 2: return p.net_mode == 1 ? profiles::compiler()
+                                           : profiles::compiler_with_network();
             default: return profiles::compiler_with_network();
         }
     }();
+
+    // The profiles always deny RWX mappings. With the filter off, add that
+    // one rule when W^X is on.
+#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
+    if (p.syscall_mode == 0 && p.wx_protect) {
+#if defined(__x86_64__)
+        constexpr clay::SysNr kMmap = 9, kMprotect = 10;
+#else
+        constexpr clay::SysNr kMmap = 222, kMprotect = 226;
+#endif
+        constexpr std::uint64_t kProtWriteExec = 0x2 | 0x4;
+        sp.deny_arg_all(kMmap, 2, kProtWriteExec, clay::SysAction::errno_, 1);
+        sp.deny_arg_all(kMprotect, 2, kProtWriteExec, clay::SysAction::errno_, 1);
+    }
+#endif
 
     // Brokered syscalls: decided at runtime by a supervisor rather than by the
     // filter. Layered on AFTER the profile, because the profile sets a flat
@@ -315,6 +334,9 @@ using namespace ::clay::literals;
     // has to clear it; an empty name skips sethostname and the new UTS
     // namespace keeps the host's own name.
     d = std::move(d).hostname(p.fake_hostname ? "sandbox" : "");
+
+    // claybin closes inherited fds unless told not to.
+    if (!p.close_inherited_fds) d = std::move(d).unsafe_inherit_fds();
 
     return std::move(d).seal();
 }

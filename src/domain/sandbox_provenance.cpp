@@ -380,7 +380,9 @@ std::vector<std::string> mask_paths(const Config& cfg, std::string_view workspac
 
     // 3. The user's own denials, last, so an explicit deny cannot be undone
     //    by one of ours.
-    for (const auto& d : cfg.deny_paths) out.push_back(d);
+    for (const auto& d : cfg.deny_paths)
+        if (auto r = resolve_user_path(d, workspace, home); !r.empty())
+            out.push_back(std::move(r));
 
     // Deduplicate: a path can arrive from the sweep and from deny_paths, and
     // emitting the same mount twice is at best noise in the plan. Sorting is
@@ -389,6 +391,25 @@ std::vector<std::string> mask_paths(const Config& cfg, std::string_view workspac
     std::sort(out.begin(), out.end());
     out.erase(std::unique(out.begin(), out.end()), out.end());
     return out;
+}
+
+std::string resolve_user_path(std::string_view path, std::string_view workspace,
+                              std::string_view home) {
+    if (path.empty()) return {};
+    std::filesystem::path p;
+    if (path == "~" || path.starts_with("~/")) {
+        if (home.empty()) return {};
+        p = std::filesystem::path{std::string{home}} / std::string{path.substr(path == "~" ? 1 : 2)};
+    } else {
+        p = std::filesystem::path{std::string{path}};
+        if (p.is_relative()) {
+            if (workspace.empty()) return {};
+            p = std::filesystem::path{std::string{workspace}} / p;
+        }
+    }
+    std::string s = p.lexically_normal().string();
+    while (s.size() > 1 && (s.back() == '/' || s.back() == '\\')) s.pop_back();
+    return s;
 }
 
 Config apply_posture(const Config& base, Posture p) {
