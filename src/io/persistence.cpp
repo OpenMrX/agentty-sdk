@@ -3023,30 +3023,48 @@ store::Settings load_settings_from_disk() {
                 (void)b.value("backend", 0);
                 c.backend = sandbox_cfg::LinuxBackend::Claybin;
             }
-            c.fs_scope     = static_cast<sandbox_cfg::FsScope>(
-                                 b.value("fs_scope", static_cast<int>(c.fs_scope)));
-            c.net_mode     = static_cast<sandbox_cfg::NetMode>(
-                                 b.value("net_mode", static_cast<int>(c.net_mode)));
-            c.syscall_mode = static_cast<sandbox_cfg::SyscallMode>(
-                                 b.value("syscall_mode", static_cast<int>(c.syscall_mode)));
-            c.handoff      = static_cast<sandbox_cfg::HandoffPolicy>(
-                                 b.value("handoff", static_cast<int>(c.handoff)));
-            c.wx_protect   = b.value("wx_protect", c.wx_protect);
-            c.max_open_files  = b.value("max_open_files", c.max_open_files);
-            c.wall_clock_secs = b.value("wall_clock_secs", c.wall_clock_secs);
-            c.cpu_secs        = b.value("cpu_secs", c.cpu_secs);
-            c.fake_hostname   = b.value("fake_hostname", c.fake_hostname);
+            // A wrong-typed value keeps the default instead of throwing: a
+            // throw here ends the whole load and drops every later section.
+            auto get = [&b](const char* k, auto def) {
+                using T = decltype(def);
+                const auto it = b.find(k);
+                if (it == b.end()) return def;
+                if constexpr (std::is_same_v<T, bool>) {
+                    return it->is_boolean() ? it->template get<bool>() : def;
+                } else {
+                    if (!it->is_number_integer()) return def;
+                    const auto v = it->template get<long long>();
+                    if (v < 0 || v > static_cast<long long>(std::numeric_limits<T>::max()))
+                        return def;
+                    return static_cast<T>(v);
+                }
+            };
+            // An out-of-range enum keeps the default.
+            auto en = [&get](const char* k, auto def, int count) {
+                using E = decltype(def);
+                const int v = get(k, static_cast<int>(def));
+                return v < count ? static_cast<E>(v) : def;
+            };
+            c.fs_scope     = en("fs_scope", c.fs_scope, 3);
+            c.net_mode     = en("net_mode", c.net_mode, 3);
+            c.syscall_mode = en("syscall_mode", c.syscall_mode, 3);
+            c.handoff      = en("handoff", c.handoff, 3);
+            c.wx_protect   = get("wx_protect", c.wx_protect);
+            c.max_open_files  = get("max_open_files", c.max_open_files);
+            c.wall_clock_secs = get("wall_clock_secs", c.wall_clock_secs);
+            c.cpu_secs        = get("cpu_secs", c.cpu_secs);
+            c.fake_hostname   = get("fake_hostname", c.fake_hostname);
             // Clamped, not trusted: this bounds a directory walk that runs on
             // every spawn, so a hand-edited 10000 would put a full-tree scan
             // in the latency path of every shell command.
             c.mask_scan_depth = std::min<std::uint32_t>(
-                b.value("mask_scan_depth", c.mask_scan_depth), 8u);
-            c.scope_ipc    = b.value("scope_ipc", c.scope_ipc);
-            c.close_inherited_fds = b.value("close_fds", c.close_inherited_fds);
-            c.memory_mb    = b.value("memory_mb", c.memory_mb);
-            c.max_procs    = b.value("max_procs", c.max_procs);
-            c.cpu_percent  = b.value("cpu_percent", c.cpu_percent);
-            c.tmp_mb       = b.value("tmp_mb", c.tmp_mb);
+                get("mask_scan_depth", c.mask_scan_depth), 8u);
+            c.scope_ipc    = get("scope_ipc", c.scope_ipc);
+            c.close_inherited_fds = get("close_fds", c.close_inherited_fds);
+            c.memory_mb    = get("memory_mb", c.memory_mb);
+            c.max_procs    = get("max_procs", c.max_procs);
+            c.cpu_percent  = get("cpu_percent", c.cpu_percent);
+            c.tmp_mb       = get("tmp_mb", c.tmp_mb);
             // Lists are absent when empty, so read them only when present --
             // and type-check, because a hand-edited settings.json is a
             // supported input and a string where an array belongs should not
@@ -3434,7 +3452,9 @@ void save_settings_locked(persistence::Held held, const store::Settings& s) {
         if (!c.read_paths.empty())  sb["read_paths"]  = c.read_paths;
         if (!c.write_paths.empty()) sb["write_paths"] = c.write_paths;
         if (!c.deny_paths.empty())  sb["deny_paths"]  = c.deny_paths;
-        if (!c.allow_ports.empty()) sb["allow_ports"] = c.allow_ports;
+        // Always written: an absent key loads the default ports, so an empty
+        // list the user chose would come back as 443/80/22/53.
+        sb["allow_ports"] = c.allow_ports;
         j["sandbox"] = std::move(sb);
     }
     if (s.rag.configured) {

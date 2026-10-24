@@ -402,7 +402,7 @@ form::Form build_sandbox_form(const sandbox_cfg::Config& cfg,
         {"no filter, and no ptrace/kill supervision either",
          "denies ptrace, mount, unshare, bpf and filters clone flags \xc2\xb7 "
          "what a compiler needs",
-         "compiler, plus no subprocesses at all"}));
+         "compiler, plus no sockets when Access is none"}));
     if (!claybin_live)
         lock_row(form, kSbSyscalls, why_locked);
 
@@ -416,6 +416,13 @@ form::Form build_sandbox_form(const sandbox_cfg::Config& cfg,
                "off: JITs work \xc2\xb7 a memory bug can map writable+executable "
                "memory directly"));
     if (!claybin_live) lock_row(form, kSbWxProtect, why_locked);
+    // Every syscall profile denies RWX, so the toggle only matters with the
+    // filter off.
+    else if (cfg.syscall_mode != sandbox_cfg::SyscallMode::Off) {
+        lock_row(form, kSbWxProtect, "always on while the syscall filter is on");
+        if (auto* t = std::get_if<form::field::Toggle>(&form.fields.back().value))
+            t->on = true;
+    }
 
     // ── Resources ─────────────────────────────────────────────────────
     // All four are cgroup2 (with rlimit as a backstop for memory/procs), and
@@ -469,24 +476,27 @@ form::Form build_sandbox_form(const sandbox_cfg::Config& cfg,
         "on: the command cannot talk to host processes over an abstract "
         "socket or signal them",
         "off: it can reach any listening host process, sandbox or not"));
+    // claybin always scopes IPC when landlock has abi 6, and never can below
+    // it, so this row reports rather than chooses.
     if (!claybin_live)
         lock_row(form, kSbScopeIpc, why_locked);
-    else if (landlock_abi < 6)
+    else {
         lock_row(form, kSbScopeIpc,
-                 "needs landlock abi 6, host has " + std::to_string(landlock_abi));
+                 landlock_abi < 6
+                     ? "needs landlock abi 6, host has " + std::to_string(landlock_abi)
+                     : std::string{"always on with landlock abi 6+"});
+        if (auto* t = std::get_if<form::field::Toggle>(&form.fields.back().value))
+            t->on = landlock_abi >= 6;
+    }
 
-    // Closing inherited fds is the one hardening row that is NOT
-    // claybin-only: it happens in the child before exec, so it applies
-    // whichever engine builds the walls. Worth stating, because bubblewrap
-    // itself leaks one and that is the reason the row exists.
     form.fields.push_back(toggle(
         kSbCloseFds, "Close inherited fds",
-        "an inherited descriptor is authority the sandbox cannot revoke \xc2\xb7 "
-        "bubblewrap leaks one",
+        "an inherited descriptor is authority the sandbox cannot revoke",
         cfg.close_inherited_fds,
         "on: the command starts with only stdin/stdout/stderr",
         "off: it inherits agentty's open files \xc2\xb7 a handle to a masked "
         "file still reads it"));
+    if (!claybin_live) lock_row(form, kSbCloseFds, why_locked);
 
     // Hostname. NOT a containment control, and the help says so rather than
     // letting it sit among the walls looking like one -- the guest cannot
@@ -695,14 +705,26 @@ void renumber_sandbox_list(SandboxListPane& p) {
     for (std::size_t i = 0; i < p.form.fields.size(); ++i) {
         const bool is_add = (i + 1 == p.form.fields.size());
         auto& f = p.form.fields[i];
+        // A port that isn't one is dropped on close, so say so while typing.
+        std::string_view bad;
+        if (p.numeric) {
+            if (const auto* t = std::get_if<form::field::Text>(&f.value)) {
+                const auto& v = t->value;
+                const bool digits = !v.empty() && v.size() <= 5
+                    && v.find_first_not_of("0123456789") == std::string::npos;
+                if (!v.empty() && (!digits || std::stoul(v) == 0 || std::stoul(v) > 65535))
+                    bad = "not a port (1-65535) \xc2\xb7 dropped on close";
+            }
+        }
         if (is_add) {
             if (f.label != "+") f.label = "+";
-            const std::string_view want = p.numeric ? "type a port" : "type a path";
+            const std::string_view want = !bad.empty() ? bad
+                : p.numeric ? "type a port" : "type a path";
             if (f.help != want) f.help = want;
         } else {
             auto want = std::to_string(i + 1) + ".";
             if (f.label != want) f.label = std::move(want);
-            if (!f.help.empty()) f.help.clear();
+            if (f.help != bad) f.help = bad;
         }
     }
 }

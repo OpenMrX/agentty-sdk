@@ -774,20 +774,17 @@ void print_usage() {
                                        "(default: cwd). Tools refuse paths outside it. "
                                        "Pass `--workspace /` to disable the gate.", kOptGutter),
         entry("      --sandbox MODE", "Wrap bash/diagnostics in an OS-native sandbox "
-                                      "(Linux: claybin or bwrap, macOS: claybin or "
-                                      "sandbox-exec). MODE = auto "
+                                      "(claybin; macOS falls back to sandbox-exec). "
+                                      "MODE = auto "
                                       "(default: use if available), on (require backend; "
                                       "fail otherwise), off (disable wrapping).", kOptGutter),
-        entry("      --sandbox-backend B", "Sandbox implementation: claybin (default, "
-                                            "in-process; Linux adds seccomp + landlock + "
-                                            "cgroup2, macOS uses seatbelt + rlimits) or the "
-                                            "platform fallback \u2014 bwrap on Linux (the "
-                                            "bubblewrap binary; mount namespaces only), "
-                                            "sandbox-exec on macOS (one fixed profile). A "
-                                            "host that cannot run claybin falls back "
-                                            "automatically. Most Sandbox settings only apply "
-                                            "under claybin \u2014 the fallbacks cannot express "
-                                            "them. Settable in the Sandbox settings pane too.",
+        entry("      --sandbox-backend B", "Sandbox implementation: claybin (the default "
+                                            "and only engine on Linux and Windows; Linux "
+                                            "adds seccomp + landlock + cgroup2, macOS uses "
+                                            "seatbelt + rlimits). On macOS a host that "
+                                            "cannot run claybin falls back to sandbox-exec "
+                                            "(one fixed profile), which ignores most Sandbox "
+                                            "settings. `bwrap` is accepted and runs claybin.",
               kOptGutter),
         entry("      --log-file PATH", "Write the diagnostic log here instead of "
                                        "~/.agentty/logs/agentty.log (or "

@@ -648,6 +648,8 @@ Cmd sandbox_update(Model& m, msg::SandboxMsg sm) {
                         ? pn::list_entry_number(id, "+", "type a port")
                         : pn::list_entry_text(id, "+", "type a path"));
                 pn::renumber_sandbox_list(ed->pane);
+            } else if (ed->pane.numeric) {
+                pn::renumber_sandbox_list(ed->pane);   // refresh bad-port hints
             }
 
             // Keep the suggestion list in step with what is typed.
@@ -745,7 +747,12 @@ Cmd sandbox_update(Model& m, msg::SandboxMsg sm) {
                 // policy that denies everything, which is never what deleting
                 // the last port meant -- fall back to the default rather than
                 // leaving a trap.
-                if (!cfg.allow_ports.empty())
+                // Only when the Access row can actually say `ports`: on a host
+                // without landlock abi 4 it is locked, and switching it would
+                // save a mode that falls back to full network.
+                const bool ports_ok = o->pane.facts.claybin_available
+                                      && o->pane.facts.landlock_abi >= 4;
+                if (!cfg.allow_ports.empty() && ports_ok)
                     cfg.net_mode = sandbox_cfg::NetMode::Ports;
                 else if (cfg.net_mode == sandbox_cfg::NetMode::Ports)
                     cfg.net_mode = sandbox_cfg::NetMode::Full;

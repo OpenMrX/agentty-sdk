@@ -14,6 +14,7 @@
 #include "agentty/io/persistence.hpp"
 #include "agentty/store/store.hpp"
 #include "agentty/domain/profile.hpp"
+#include "agentty/domain/sandbox_config.hpp"
 #include "agentty/runtime/panel/settings/items.hpp"
 
 #include <cstdint>
@@ -83,7 +84,45 @@ TEST_CASE("settings defaults + persistence round-trip") {
     check(persistence::load_settings(::agentty::IoAccess::grant()).profile == Profile::Minimal,
           "save/load round-trips Minimal");
 
+    // (5) Sandbox: an emptied port list stays empty.
+    {
+        store::Settings s;
+        s.sandbox.configured = true;
+        s.sandbox.allow_ports.clear();
+        persistence::save_settings(::agentty::IoAccess::grant(), agtest::cap(), s);
+    }
+    check(persistence::load_settings(::agentty::IoAccess::grant()).sandbox.allow_ports.empty(),
+          "an empty allow_ports list round-trips as empty");
+
+    // (6) Bad sandbox values keep the default instead of breaking the load.
+    {
+        std::ofstream ofs(settings_json, std::ios::trunc);
+        ofs << R"({"profile":1,"sandbox":{"configured":true,"net_mode":9,)"
+               R"("syscall_mode":-1,"memory_mb":"lots","wx_protect":"yes"},)"
+               R"("rag":{"configured":true}})";
+    }
+    {
+        const auto s = persistence::load_settings(::agentty::IoAccess::grant());
+        const sandbox_cfg::Config def;
+        check(s.sandbox.net_mode == def.net_mode, "out-of-range net_mode keeps the default");
+        check(s.sandbox.syscall_mode == def.syscall_mode, "negative syscall_mode keeps the default");
+        check(s.sandbox.memory_mb == def.memory_mb, "string memory_mb keeps the default");
+        check(s.sandbox.wx_protect == def.wx_protect, "string wx_protect keeps the default");
+        check(s.rag.configured, "a bad sandbox value doesn't drop later sections");
+    }
+
     fs::remove_all(tmp);
+}
+
+TEST_CASE("sandbox user paths resolve to absolute") {
+    using sandbox_cfg::resolve_user_path;
+    check(resolve_user_path("~/.cargo", "/w", "/home/u") == "/home/u/.cargo", "~/x expands");
+    check(resolve_user_path("~", "/w", "/home/u") == "/home/u", "~ expands");
+    check(resolve_user_path("build/out/", "/w", "/home/u") == "/w/build/out",
+          "relative resolves against the workspace, trailing / dropped");
+    check(resolve_user_path("/opt/x/../y", "/w", "/home/u") == "/opt/y", "absolute is normalised");
+    check(resolve_user_path("~/x", "/w", "").empty(), "~ with no home is dropped");
+    check(resolve_user_path("/", "/w", "/home/u") == "/", "/ stays /");
 }
 
 TEST_CASE("settings rows harden bad input") {
