@@ -177,6 +177,27 @@ int main() {
     // reason is the failure mode this harness has already hit twice.
     agentty::tools::util::set_workspace_root(::agentty::IoAccess::grant(), kWorkspace);
 
+    // ── net_mode=Ports: listed TCP ports only, and no listening ──────────
+    std::printf("net_mode=Ports with 443 only:\n");
+    {
+        auto p = base_posture();
+        p.net_mode = 2;
+        p.allow_ports = {443};
+        std::string out;
+        run(p, "python3 - <<'EOF' 2>&1\n"
+               "import socket\n"
+               "s=socket.socket(); s.settimeout(2)\n"
+               "try: s.connect(('127.0.0.1', 80)); print('tcp80 ok')\n"
+               "except PermissionError: print('tcp80 denied')\n"
+               "except Exception as e: print('tcp80 other', e)\n"
+               "s=socket.socket()\n"
+               "try: s.bind(('127.0.0.1', 0)); s.listen(); print('bind ok')\n"
+               "except PermissionError: print('bind denied')\n"
+               "EOF", out);
+        expect(out.find("tcp80 denied") != std::string::npos, "an unlisted port is refused");
+        expect(out.find("bind denied") != std::string::npos, "listening is refused");
+    }
+
     // ── Strict still runs a shell, and W^X applies with the filter off ──
     // Strict used to map to with_filesystem(), which has no execve, so the
     // Hardened and Airgapped presets failed every command.
@@ -543,6 +564,37 @@ int main() {
             // main.cpp would pass the test above and break every build.
             expect(r.output.find("int main") != std::string::npos,
                    "an ordinary workspace file is still readable");
+
+            // Host-readable grants read on /, and the masks must still hold.
+            const char* real_home = std::getenv("HOME");
+            const std::string saved_home = real_home ? real_home : "";
+            const std::string fake = std::string{kWorkspace} + "-home";
+            std::filesystem::create_directories(fake + "/.ssh");
+            if (std::FILE* f = std::fopen((fake + "/.ssh/id_ed25519").c_str(), "w")) {
+                std::fputs("SSH_should_never\n", f);
+                std::fclose(f);
+            }
+            ::setenv("HOME", fake.c_str(), 1);
+            sb::reset_config_for_test();
+            agentty::sandbox_cfg::Config hr;
+            hr.configured = true;
+            hr.fs_scope = agentty::sandbox_cfg::FsScope::HostReadable;
+            sb::set_config(hr);
+            sb::init(sb::Mode::On);
+            auto h = sb::run_shell_command(
+                "cat .env " + fake + "/.ssh/id_ed25519 2>&1; echo ---; head -c 4 /etc/os-release",
+                64 * 1024, std::chrono::seconds{30});
+            ::setenv("HOME", saved_home.c_str(), 1);
+            std::filesystem::remove_all(fake);
+            expect(h.started, "host-readable starts a command");
+            expect(h.output.find("should_never") == std::string::npos,
+                   "host-readable still masks .env and ~/.ssh");
+            expect(h.output.find("---\n") != std::string::npos
+                       && h.output.size() > h.output.find("---\n") + 4,
+                   "host-readable can read outside the toolchain dirs");
+            sb::reset_config_for_test();
+            sb::set_config(agentty::sandbox_cfg::Config{});
+            sb::init(sb::Mode::Auto);
         }
 
         // The Hardened preset must still run a command (Strict once had no

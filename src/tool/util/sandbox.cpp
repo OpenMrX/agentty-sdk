@@ -378,7 +378,10 @@ constexpr const char* kHomeToolSubdirsWin[] = {
                 p.home_tool_dirs.emplace_back(std::string{home} + sub);
         }
     } else if (cfg.fs_scope == sandbox_cfg::FsScope::HostReadable) {
-        p.system_read_roots.emplace_back("/");
+        // `/` alone: binding /usr etc. under a read-only `/` fails creating
+        // their mount points, which killed every spawn.
+        p.system_read_roots = {"/"};
+        p.etc_readable.clear();
     }
 #endif
     // Whatever the user added on top, made absolute (claybin ignores `~` and
@@ -714,7 +717,7 @@ constexpr const char* kHomeToolSubdirsWin[] = {
     p += "(allow process-exec)\n";
     p += "(allow process-fork)\n";
     p += "(allow signal (target same-sandbox))\n";
-    // Reads: broad — same rationale as bwrap's ro-bind on system dirs.
+    // Reads: broad. Credential paths are denied at the end of the profile.
     p += "(allow file-read*)\n";
     // Writes: workspace + tmp/cache regions only. The workspace path is
     // SBPL-escaped (see sbpl_escape). If it can't be represented safely (a
@@ -739,6 +742,15 @@ constexpr const char* kHomeToolSubdirsWin[] = {
     p += "(allow mach-lookup)\n";
     p += "(allow iokit-open)\n";
     p += "(allow sysctl-read)\n";
+    // Credential paths, the same list claybin masks. Last, because a later
+    // rule wins in SBPL and the workspace write allow above would reopen them.
+    {
+        const char* home = std::getenv("HOME");
+        const auto snap = config_snapshot();
+        for (const auto& m : sandbox_cfg::mask_paths(*snap, workspace, home ? home : ""))
+            if (std::string esc = sbpl_escape(m); !esc.empty())
+                p += "(deny file-read* file-write* (subpath \"" + esc + "\"))\n";
+    }
     return p;
 }
 
