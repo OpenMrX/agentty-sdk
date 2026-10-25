@@ -4,6 +4,28 @@ All notable changes to agentty. Versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **The Hardened and Airgapped sandbox presets run commands again.** Their
+  strict syscall mode used a profile with no `execve`, so every command failed
+  with `spawn failed: execve (errno 1)`.
+- **The host-readable filesystem scope runs commands again.** Every spawn
+  failed with `bind_target: touch (errno 13)`.
+- **Clearing the allowed ports no longer opens the whole network.** Emptying
+  the list used to switch Access to `full`, and closing the port editor could
+  loosen `none` to `ports` even with nothing changed.
+- **On macOS, the sandbox-exec fallback now hides `~/.ssh` and the other
+  credential files** claybin masks. It used to allow reading everything.
+- Sandbox settings that did nothing now apply or say why they can't: W^X with
+  the syscall filter off, close inherited fds = off, and Scope IPC (always on
+  with landlock abi 6).
+- Read, write and masked paths written as `~/...` or relative paths now work;
+  they used to grant nothing.
+- An emptied port list stays empty after a restart, and one bad value in the
+  sandbox section of `settings.json` no longer drops every setting after it.
+- A port that isn't one is flagged while you type instead of vanishing.
+  The port help no longer says forgetting 53 breaks everything: ports mode
+  only filters outgoing TCP.
+
 ## [0.9.33] - 2026-10-24
 
 ### Fixed
