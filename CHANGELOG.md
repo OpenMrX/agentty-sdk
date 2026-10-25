@@ -4,6 +4,8 @@ All notable changes to agentty. Versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.34] - 2026-10-26
+
 ### Fixed
 - **The Hardened and Airgapped sandbox presets run commands again.** Their
   strict syscall mode used a profile with no `execve`, so every command failed
