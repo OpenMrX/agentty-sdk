@@ -4,6 +4,28 @@ All notable changes to agentty. Versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.35] - 2026-10-26
+
+### Fixed
+- **Models that need their earlier reasoning back no longer get stuck on
+  HTTP 400** (#117). On OpenAI-compatible providers agentty now sends each
+  turn's reasoning back under the field it arrived in (`reasoning_content` or
+  `reasoning`), the way GitHub's Copilot CLI does. Reasoning is kept even
+  when hidden, since the next request needs it.
+- **Stopping an external ACP agent no longer pulls it out from under a turn
+  that is still running.** The last user of the agent now tears it down.
+- **Reloading MCP plugins no longer leaks a copy of the whole tool catalog**
+  each time. Old catalogs and old user-agent lists are freed once nothing
+  uses them.
+- **Switching themes twice in a row can no longer leave the old palette
+  stuck.**
+
+### Changed
+- More of the concurrency rules are checked by the compiler instead of by
+  review: shared objects must be thread-safe, blocking waits need proof that
+  no lock is held, and only the event loop can mark a thread as the loop.
+  See `docs/design/concurrency-audit.md`.
+
 ## [0.9.34] - 2026-10-26
 
 ### Fixed
