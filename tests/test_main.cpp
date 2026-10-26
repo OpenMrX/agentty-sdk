@@ -174,7 +174,7 @@ int main(int argc, char** argv) {
     // inside a test still has no token and still aborts, because the identity
     // is per-thread — that is exactly what loop_affinity_test asserts in a
     // forked child.
-    const maya::loop_identity loop_id;
+    const auto loop_id = maya::arm_loop_for_tests();
 
     const int rc = doctest::Context(argc, argv).run();
     return rc;   // the atexit hook above removes the sandbox

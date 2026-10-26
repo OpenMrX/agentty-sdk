@@ -688,7 +688,7 @@ std::string system_prompt_with_overlay(Io io, std::string_view provider_id, bool
 
 std::vector<ToolSpec> default_tools() {
     std::vector<ToolSpec> out;
-    for (const auto& td : tools::wire_tools()) {
+    for (const auto& td : *tools::wire_tools()) {
         if (!td.advertise) continue;   // dispatch-only (proxy owns the schema)
         out.push_back({td.name.value, td.description, td.input_schema});
     }

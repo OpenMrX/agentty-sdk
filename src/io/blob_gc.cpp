@@ -288,7 +288,7 @@ void start_background_gc() {
     // needs no cancel().
     // Once per process.
     static std::once_flag once;
-    std::call_once(once, [] {
+    maya::once(once, [] {
         util::teardown::on_shutdown("blobs.gc",
                                     [](const maya::unlocked& cap) { join_background_gc(cap); });
 

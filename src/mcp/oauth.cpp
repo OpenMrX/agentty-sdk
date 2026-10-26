@@ -146,7 +146,7 @@ using sock_t = int;
 sock_t open_loopback(std::uint16_t& out_port, std::string& err) {
 #if defined(_WIN32)
     static std::once_flag wsa_once;
-    std::call_once(wsa_once, []{ WSADATA w; WSAStartup(MAKEWORD(2,2), &w); });
+    maya::once(wsa_once, []{ WSADATA w; WSAStartup(MAKEWORD(2,2), &w); });
     const sock_t kInvalid = INVALID_SOCKET;
 #else
     const sock_t kInvalid = -1;

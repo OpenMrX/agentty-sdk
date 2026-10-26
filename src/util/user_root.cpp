@@ -273,7 +273,7 @@ fs::path user_root() {
 #endif
         if (!ec) ensured.publish(std::make_shared<const fs::path>(root));
     }
-    std::call_once(once, [&] { migrate_legacy_config(root); });
+    maya::once(once, [&] { migrate_legacy_config(root); });
     return root;
 }
 

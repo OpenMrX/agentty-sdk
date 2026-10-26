@@ -193,7 +193,7 @@ fs::path credentials_path() { return config_dir() / "credentials.json"; }
 void prewarm_anthropic() {
     static std::once_flag once;
     bool first = false;
-    std::call_once(once, [&first] { first = true; });
+    maya::once(once, [&first] { first = true; });
     if (!first) {
         AGT_LOG(Perf, Debug, "prewarm.anthropic", "skip=already_started");
         return;

@@ -632,6 +632,7 @@ public:
 
 // Where an agent persona came from — the provenance the task card surfaces
 // so a repo-injected agent is never invisible (transparency, not a gate).
+} // namespace (anonymous)
 enum class AgentOrigin : std::uint8_t { Builtin, User, Project };
 
 struct AgentType {
@@ -665,18 +666,28 @@ struct AgentType {
 // name (a user file can't silently replace `general`).
 //
 // Storage note: AgentType's fields are string_views into `owned`. A
-// generation is immutable once published and never freed: a subagent holds
-// a `const AgentType&` across its whole (minutes-long) run, so each
-// generation keeps the one it replaced alive through `prev`. Bounded in
-// practice by how often the agent files change on disk.
+// generation is immutable once published; a subagent run holds a
+// ResolvedAgent, which keeps its generation alive for the whole run, so a
+// rescan never frees what a run is reading and an old generation dies with
+// its last run.
 struct UserAgentStore {
     std::vector<std::unique_ptr<AgentType>> types;   // stable addresses
     std::deque<std::string>                 owned;   // element-stable backing
     std::string                             sig = "\x01uninit";
-    std::shared_ptr<const UserAgentStore>   prev;
 };
 
-// Leaked on purpose, like the generations it holds.
+} // namespace agentty::tools
+// AgentType's string_views point at string literals (built-ins) or into its
+// UserAgentStore's `owned` deque, which nothing writes after publish and
+// which lives as long as the store. A run holds the store (ResolvedAgent),
+// so the views never outlive their bytes. That makes a const AgentType
+// Frozen; jaal can't see it because views are refused on principle.
+MAYA_FROZEN(agentty::tools::AgentType);
+namespace agentty::tools {
+namespace {
+
+// Leaked so a run abandoned at the shutdown grace can still read it while
+// statics go; the generations themselves are refcounted.
 maya::published<const UserAgentStore>& user_agent_gen() {
     static auto* g = new maya::published<const UserAgentStore>;
     return *g;
@@ -786,7 +797,6 @@ std::shared_ptr<const UserAgentStore> user_agents() {
     if (cur && cur->sig == sig) return cur;
     auto next = std::make_shared<UserAgentStore>();
     next->sig  = sig;
-    next->prev = cur;
     UserAgentStore& store = *next;
     // std::deque never moves existing elements on push_back, so the
     // string_views taken into owned.back() stay valid even for SSO-small
@@ -852,7 +862,17 @@ std::vector<std::string> project_agent_names() {
 
 namespace {
 
-const AgentType& resolve_agent_type(std::string_view t) {
+// An agent type and what keeps it alive: a built-in lives forever, a user
+// type lives in its generation, which the handle holds for as long as the
+// run that asked for it.
+struct ResolvedAgent {
+    std::shared_ptr<const UserAgentStore> store;   // null for a built-in
+    const AgentType*                      type;
+    const AgentType& operator*()  const noexcept { return *type; }
+    const AgentType* operator->() const noexcept { return type; }
+};
+
+ResolvedAgent resolve_agent_type(std::string_view t) {
     using MR = smart::ModelRole;
     static const std::vector<AgentType> kTypes = {
         {"explorer", true,
@@ -892,14 +912,13 @@ const AgentType& resolve_agent_type(std::string_view t) {
          {}, MR::Implementation},
     };
     for (const auto& a : kTypes)
-        if (a.name == t) return a;
+        if (a.name == t) return {nullptr, &a};
     // User-defined agents (.agentty/agents/*.md): consulted after the
-    // built-ins so a user file can never shadow `general` etc. The
-    // returned reference points into a generation that is never freed (see
-    // UserAgentStore) so it outlives the whole subagent run.
-    for (const auto& ua : user_agents()->types)
-        if (ua->name == t) return *ua;
-    return kTypes.back();
+    // built-ins so a user file can never shadow `general` etc.
+    auto gen = user_agents();
+    for (const auto& ua : gen->types)
+        if (ua->name == t) return {gen, ua.get()};
+    return {nullptr, &kTypes.back()};
 }
 
 // Did the subagent's OWN report say it failed?
@@ -1655,7 +1674,9 @@ public:
         }
 
 
-        const AgentType& type = resolve_agent_type(sreq.agent_type);
+        // Held for the whole run: a rescan of the agent files can't free it.
+        const ResolvedAgent resolved = resolve_agent_type(sreq.agent_type);
+        const AgentType& type = *resolved;
 
         Thread thread;
         if (stats) thread.messages = stats->history;
@@ -1977,7 +1998,7 @@ public:
                     }
                     // Only tools this run was offered may run. A model can
                     // still name one it wasn't given (read-only, --no-network).
-                    if (const auto* def = tools::find(tc.name.value);
+                    if (const auto def = tools::find(tc.name.value);
                         def && !subagent_tool_allowed(*def, type, stats)) {
                         if (stats) { ++stats->tool_calls; ++stats->tool_errors; }
                         tc.status = ToolUse::Failed{now, now,
@@ -2231,7 +2252,7 @@ bool is_known_agent_type(std::string_view name) {
     // built-ins and user agents come and go because it reuses the same
     // resolver rather than a second copy of the list.
     if (name.empty()) return false;
-    return resolve_agent_type(name).name == name;
+    return resolve_agent_type(name)->name == name;
 }
 
 std::string known_agent_types() {
@@ -2676,8 +2697,8 @@ namespace subagent {
 // stable label. Unknown → "builtin" (no tag shown). Defined at end-of-TU so
 // it doesn't shadow the subagent::current() calls used earlier in the file.
 std::string_view agent_origin(Io, std::string_view name) noexcept {
-    const AgentType& t = resolve_agent_type(name);
-    switch (t.origin) {
+    const ResolvedAgent r = resolve_agent_type(name);
+    switch (r->origin) {
         case AgentOrigin::User:    return "user";
         case AgentOrigin::Project: return "project";
         case AgentOrigin::Builtin: break;

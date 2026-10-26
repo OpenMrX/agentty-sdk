@@ -22,6 +22,7 @@
 #include "agentty/domain/catalog.hpp"
 #include "agentty/domain/smart_mode.hpp"
 #include "agentty/provider/provider.hpp"
+#include "agentty/util/callback.hpp"
 #include "agentty/util/sendable.hpp"
 
 namespace agentty::tools::subagent {
@@ -50,9 +51,9 @@ struct Config {
     // runner falls back to the Anthropic transport (old behaviour, keeps
     // tests that install only auth+model working). Runs on the subagent's
     // worker, which holds no lock: it gets that worker's `unlocked`.
-    std::function<provider::StreamResult(const maya::unlocked&,
-                                         provider::Request,
-                                         provider::EventSink)> stream;
+    ::agentty::util::Callback<provider::StreamResult(const maya::unlocked&,
+                                          provider::Request,
+                                          provider::EventSink)> stream;
 
     // The same dispatch, but to a NAMED provider instead of the active one.
     //
@@ -69,10 +70,10 @@ struct Config {
     // this gets the old behaviour — the role falls back to the active
     // provider's own cheapest capable model, never a 404. Runs on the
     // subagent's worker: it gets that worker's `unlocked`.
-    std::function<provider::StreamResult(const maya::unlocked&,
-                                         const std::string& provider_id,
-                                         provider::Request,
-                                         provider::EventSink)> stream_to;
+    ::agentty::util::Callback<provider::StreamResult(const maya::unlocked&,
+                                          const std::string& provider_id,
+                                          provider::Request,
+                                          provider::EventSink)> stream_to;
 
     // Smart Mode config, mirrored from the Model so the subagent runner can
     // resolve a worker's model by its ROLE (Layer 3b) when
@@ -247,8 +248,6 @@ std::size_t shutdown_running(const maya::unlocked&,
 
 } // namespace agentty::tools::subagent
 
-// The stream seams are std::function, which jaal can't see inside. They
-// are set at install and called, never mutated, after; the callables they
-// wrap capture shared, thread-safe provider handles (main.cpp). Moving a
-// Config to another thread therefore shares nothing unsafe.
-MAYA_SENDABLE(agentty::tools::subagent::Config);
+// The stream seams are util::Callback: set at install and called, never
+// mutated, after; the callables capture shared, thread-safe provider handles
+// (main.cpp). The rest is owned data, so jaal walks the struct itself.

@@ -27,6 +27,7 @@
 // reader, which never takes any lock a caller of this class could hold.
 
 #include "agentty/mcp/connection.hpp"
+#include "agentty/util/callback.hpp"
 #include "agentty/mcp/client.hpp"
 
 #include <atomic>
@@ -80,7 +81,7 @@ constexpr unsigned kHeld = 1;
 
 // Claim the gate, blocking (atomic wait, holding nothing of ours) while
 // someone else holds it. A stop on `st` ends the wait: returns false.
-bool claim(Gate& gate, std::stop_token st = {}) {
+bool claim(const maya::unlocked& cap, Gate& gate, std::stop_token st = {}) {
     std::stop_callback wake(st, [&gate] {
         gate.fetch_add(2, std::memory_order_acq_rel);   // epoch += 1; bit 0 untouched
         gate.notify_all();
@@ -92,7 +93,7 @@ bool claim(Gate& gate, std::stop_token st = {}) {
             if (gate.compare_exchange_weak(v, v | kHeld, std::memory_order_acquire)) return true;
             continue;
         }
-        gate.wait(v, std::memory_order_acquire);
+        maya::atomic_wait(cap, gate, v, std::memory_order_acquire);
         v = gate.load(std::memory_order_acquire);
     }
 }
@@ -112,9 +113,11 @@ struct Connection::Live {
     m::ClientHandlers          handlers;
     // Who to tell about a tool call's progress. One call at a time per
     // connection, so one slot is enough.
-    maya::published<const std::function<void(std::string_view)>> progress;
+    using Progress = util::Callback<void(std::string_view)>;
+    maya::published<const Progress> progress;
     // Who answers the server's elicitation/create for the in-flight call.
-    maya::published<const std::function<m::Json(const m::Json&)>> elicit;
+    using Elicit = util::Callback<m::Json(const m::Json&)>;
+    maya::published<const Elicit> elicit;
 
     ~Live() {
         // ~Peer stops and joins its tasks itself; the holder goes after it.
@@ -123,8 +126,18 @@ struct Connection::Live {
     }
 };
 
+}  // namespace agentty::mcp
+// Checked by hand (Live owns a Peer, which jaal can't walk). holder, caps and
+// handlers are written only by connect() before live_ publishes the object,
+// and read after; lists is a snapshot, poisoned/busy are atomics, the two
+// callback slots are published, and Peer is Sync. So once published, many
+// threads may use one Live at once.
+MAYA_SYNC(agentty::mcp::Connection::Live);
+namespace agentty::mcp {
+
 namespace {
-using ElicitDone = std::function<void(const std::string&)>;
+
+using ElicitDone = util::Callback<void(const std::string&)>;
 // Set by an ACP editor that can open URL elicitations. Empty: form only.
 maya::published<const ElicitDone>& url_elicit_done() {
     static maya::published<const ElicitDone> d;
@@ -133,7 +146,7 @@ maya::published<const ElicitDone>& url_elicit_done() {
 }  // namespace
 
 void set_url_elicitation(std::function<void(const std::string&)> done) {
-    url_elicit_done().publish(std::make_shared<const ElicitDone>(std::move(done)));
+    url_elicit_done().publish(std::make_shared<const ElicitDone>(ElicitDone{std::move(done)}));
 }
 
 namespace {
@@ -142,8 +155,8 @@ namespace {
 struct Turn {
     Gate& busy;
     bool  held;
-    explicit Turn(Gate& b, std::stop_token st = {})
-        : busy(b), held(claim(busy, std::move(st))) {}
+    Turn(const maya::unlocked& cap, Gate& b, std::stop_token st = {})
+        : busy(b), held(claim(cap, busy, std::move(st))) {}
     ~Turn() { if (held) release(busy); }
 };
 
@@ -336,7 +349,7 @@ Connection::ensure_live(const maya::unlocked& cap) {
     if (!mine) {
         // Block until the winner finishes (atomic wait, not a sleep-poll),
         // then use whatever it left, if it is healthy.
-        reconnecting_.wait(true, std::memory_order_acquire);
+        maya::atomic_wait(cap, reconnecting_, true, std::memory_order_acquire);
         if (auto now = live_.current(); healthy(now)) return now;
         return std::unexpected(std::string{"mcp server '" + origin_ + "' is not running"});
     }
@@ -366,7 +379,7 @@ Connection::ensure_live(const maya::unlocked& cap) {
 }
 
 void Connection::set_on_list_changed(ListChangedFn fn) {
-    on_changed_->publish(std::make_shared<const ListChangedFn>(std::move(fn)));
+    on_changed_->publish(std::make_shared<const Changed>(Changed{std::move(fn)}));
 }
 
 // ── lists ───────────────────────────────────────────────────────────────────
@@ -489,13 +502,13 @@ m::cap::Result Connection::execute_impl(const maya::unlocked& cap, const m::cap:
     auto got = ensure_live(cap);
     if (!got) return m::cap::Result::error(std::move(got.error()));
     auto l = std::move(*got);
-    Turn turn(l->busy, req.stop);
+    Turn turn(cap, l->busy, req.stop);
     // Cancelled while queued behind another call on this server.
     if (!turn.held) return m::cap::Result::error("cancelled");
 
-    l->progress.publish(std::make_shared<const std::function<void(std::string_view)>>(req.progress));
+    l->progress.publish(std::make_shared<const Live::Progress>(Live::Progress{req.progress}));
     l->elicit.publish(req.elicit
-        ? std::make_shared<const std::function<m::Json(const m::Json&)>>(req.elicit) : nullptr);
+        ? std::make_shared<const Live::Elicit>(Live::Elicit{req.elicit}) : nullptr);
     struct Clear { Live& l; ~Clear() { l.progress.publish(nullptr); l.elicit.publish(nullptr); } } clear{*l};
 
     // A cancel mid-call closes the connection (the server can't be trusted
@@ -530,7 +543,7 @@ bool Connection::read_resource(const std::string& uri, std::vector<m::ResourceCo
     return entry_root([&](const maya::unlocked& cap) {
     auto got = ensure_live(cap);
     if (!got) { err = std::move(got.error()); return false; }
-    Turn turn((*got)->busy);
+    Turn turn(cap, (*got)->busy);
     auto r = (*got)->peer->call<m::to_server::ReadResource>(cap, m::ReadResourceParams{uri, m::Json::object()});
     if (!r) { err = std::string{"resources/read failed: "} + r.error().what(); return false; }
     out = std::move(r->contents);
@@ -544,7 +557,7 @@ bool Connection::get_prompt(const std::string& name,
     return entry_root([&](const maya::unlocked& cap) {
     auto got = ensure_live(cap);
     if (!got) { err = std::move(got.error()); return false; }
-    Turn turn((*got)->busy);
+    Turn turn(cap, (*got)->busy);
     m::GetPromptParams p;
     p.name = name;
     if (!args.empty()) p.arguments = args;

@@ -147,19 +147,17 @@ concept Tool = requires {
 };
 
 struct DynamicDispatch {
-    [[nodiscard]] static const tools::ToolDef* find(std::string_view name) noexcept {
+    [[nodiscard]] static tools::Found find(std::string_view name) noexcept {
         return tools::find(name);
     }
 
-    // Resolve a tool to its (immortal, since registry.cpp's WireCache keeps
-    // every snapshot alive) ToolDef pointer ONCE, so a caller that gates and
-    // then executes does both against the SAME definition. This closes the
-    // TOCTOU where an `mcp/tools/list_changed` between needs_permission() and
-    // execute() could resolve the tool name to two different ToolDefs with
-    // different effect sets (gate against benign annotations, run with full
-    // effects, or vice-versa). Callers that gate-then-execute should resolve
-    // once and pass the pointer to the *_with overloads below.
-    [[nodiscard]] static const tools::ToolDef* resolve(std::string_view name) noexcept {
+    // Resolve a tool ONCE, so a caller that gates and then executes does both
+    // against the SAME definition: an `mcp/tools/list_changed` between the two
+    // would otherwise resolve the name to two ToolDefs with different effect
+    // sets. The Found keeps its catalog alive, so the definition can't be
+    // freed under a call that runs for minutes. Callers that gate-then-execute
+    // resolve once and pass the handle to the *_with overloads below.
+    [[nodiscard]] static tools::Found resolve(std::string_view name) noexcept {
         return tools::find(name);
     }
 
@@ -167,7 +165,7 @@ struct DynamicDispatch {
     // execute(name, args) but skips the second name lookup. Tools run on a
     // worker holding no lock, and may block: `unlocked`.
     [[nodiscard]] static ExecResult execute_with(const maya::unlocked& cap,
-                                                 const tools::ToolDef* td,
+                                                 const tools::Found& td,
                                                  std::string_view name,
                                                  const nlohmann::json& args,
                                                  const tools::CallContext& ctx) noexcept {
@@ -223,7 +221,7 @@ struct DynamicDispatch {
     }
 
     // Permission decision against a pre-resolved ToolDef (see resolve()).
-    [[nodiscard]] static bool needs_permission_with(const tools::ToolDef* td,
+    [[nodiscard]] static bool needs_permission_with(const tools::Found& td,
                                                     Profile profile) noexcept {
         if (!td) return true;   // unknown tool fails closed
         return tools::policy::permission(td->effects, profile)
@@ -248,7 +246,7 @@ struct DynamicDispatch {
     [[nodiscard]] static ExecResult execute_approved(
         const maya::unlocked& cap, std::string_view name, const nlohmann::json& args,
         std::uint64_t approved_hash, const tools::CallContext& ctx) noexcept {
-        const auto* td = tools::find(name);
+        const auto td = tools::find(name);
         if (!td) return std::unexpected(ToolError::not_found(tools::unknown_tool_error(name)));
         if (approved_hash != 0 && td->definition_hash() != approved_hash) {
             return std::unexpected(ToolError::denied(
@@ -272,7 +270,7 @@ struct DynamicDispatch {
     // tools default to "needs permission" (fail closed).
     [[nodiscard]] static bool needs_permission(std::string_view name,
                                                Profile profile) noexcept {
-        const auto* td = tools::find(name);
+        const auto td = tools::find(name);
         if (!td) return true;
         return tools::policy::permission(td->effects, profile)
                == tools::policy::Decision::Prompt;
@@ -282,7 +280,7 @@ struct DynamicDispatch {
     // effects + the active profile to explain why permission is needed.
     [[nodiscard]] static std::string_view permission_reason(
         std::string_view name, Profile profile) noexcept {
-        const auto* td = tools::find(name);
+        const auto td = tools::find(name);
         if (!td) return "unknown tool";
         return tools::policy::reason(td->effects, profile);
     }

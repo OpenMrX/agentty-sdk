@@ -117,10 +117,10 @@ void registry_race() {
         readers.emplace_back([&] {
             sync.arrive_and_wait();
             while (!stop.load(std::memory_order_relaxed)) {
-                // Take a SNAPSHOT (the safe API) and walk it fully: every
-                // name must stay readable for as long as we hold it.
-                const auto snap = wire_tools_snapshot();
-                for (const auto& t : snap)
+                // Hold the catalog handle and walk it fully: every name
+                // must stay readable for as long as we hold it.
+                const auto snap = wire_tools();
+                for (const auto& t : *snap)
                     if (t.name.value.empty()) bad.fetch_add(1, std::memory_order_relaxed);
                 reads.fetch_add(1, std::memory_order_relaxed);
             }

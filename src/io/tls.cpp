@@ -413,7 +413,7 @@ SharedCtx& shared() {
     // Deliberate leak — process lifetime, avoids destruction order races.
     static SharedCtx* s = new SharedCtx{};
     static std::once_flag once;
-    std::call_once(once, [] {
+    maya::once(once, [] {
         s->verifying = build_ctx(false);
         // Env gate: AGENTTY_INSECURE=1 collapses both handles into the insecure
         // one, so a code path that asks for the "verified" handle still

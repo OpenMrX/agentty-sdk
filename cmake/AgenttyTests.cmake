@@ -793,7 +793,7 @@ add_executable(cred_crypt_test EXCLUDE_FROM_ALL
     tests/cred_crypt_test.cpp src/io/cred_crypt.cpp src/util/base64.cpp)
 target_include_directories(cred_crypt_test PRIVATE include)
 target_link_libraries(cred_crypt_test PRIVATE
-    nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
+    maya::maya maya::runtime nlohmann_json::nlohmann_json OpenSSL::SSL OpenSSL::Crypto)
 add_test(NAME cred_crypt_test COMMAND cred_crypt_test)
 set_tests_properties(cred_crypt_test PROPERTIES TIMEOUT 60 LABELS sanitizer)
 

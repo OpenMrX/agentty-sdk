@@ -287,7 +287,7 @@ void start_background_refresh(bool no_net) {
     // the callback can never outlive its target and needs no cancel(). The
     // whole start runs once per process.
     static std::once_flag once;
-    std::call_once(once, [no_net] {
+    maya::once(once, [no_net] {
         util::teardown::on_shutdown("modelsdev.refresh",
                                     [](const maya::unlocked& cap) { join_background_refresh(cap); });
 

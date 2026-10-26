@@ -27,6 +27,8 @@
 #include <mcp/client.hpp>
 
 #include "agentty/rpc/peer.hpp"
+#include "agentty/util/callback.hpp"
+#include "agentty/util/sendable.hpp"
 
 namespace agentty::mcp {
 
@@ -92,8 +94,11 @@ public:
     // The capabilities the live connection negotiated (empty when down).
     [[nodiscard]] ::mcp::ServerCapabilities server_capabilities() const;
 
+    // The peer, the holder, the cached lists. Opaque outside connection.cpp;
+    // public only so its Sync claim there can name it.
+    struct Live;
+
 private:
-    struct Live;   // the peer, the holder, the cached lists
 
     // The capability-carrying core. The CapabilityProvider overrides above
     // are the entry points (their signatures are mcp-cpp's) and mint the
@@ -120,8 +125,9 @@ private:
     std::atomic<bool>     reconnecting_{false};
     // The host's list_changed callback, read from the peer's reader. Shared
     // with the handlers, which can outlive this object (see handlers()).
-    std::shared_ptr<maya::published<const ListChangedFn>> on_changed_ =
-        std::make_shared<maya::published<const ListChangedFn>>();
+    using Changed = util::Callback<void()>;
+    std::shared_ptr<maya::published<const Changed>> on_changed_ =
+        std::make_shared<maya::published<const Changed>>();
 };
 
 }  // namespace agentty::mcp

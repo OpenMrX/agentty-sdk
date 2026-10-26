@@ -84,7 +84,7 @@ public:
         // pointer itself is never written concurrently — only the once_flag
         // inside it is, and that is what it is for. Encoding is pure, so
         // concurrent readers all observe the same bytes.
-        std::call_once(b64_->once, [&] { b64_->text = util::base64_encode(bytes()); });
+        maya::once(b64_->once, [&] { b64_->text = util::base64_encode(bytes()); });
         return b64_->text;
     }
 

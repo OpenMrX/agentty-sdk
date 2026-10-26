@@ -1771,7 +1771,7 @@ SchedDecision schedule_parallel_batch(const std::vector<ToolUse>& batch) {
     // tools. Resolve once against the generation-stable catalog; unknown tools
     // still fail closed as Exec.
     auto effects_of = [](const ToolName& n) -> tools::EffectSet {
-        if (const auto* def = tools::find(n.value))
+        if (const auto def = tools::find(n.value))
             return def->scheduling_effects;
         return tools::EffectSet{tools::Effect::Exec};
     };
@@ -2129,7 +2129,7 @@ Cmd kick_pending_tools(Model& m) {
             // Fingerprint the definition the user is about to be SHOWN, so
             // the approval is tied to that definition and not just to the
             // name. Verified again at launch (execute_approved).
-            const auto* shown = tools::find(tc.name.value);
+            const auto shown = tools::find(tc.name.value);
             m.d.pending_permission = PendingPermission{
                 tc.id, tc.name,
                 "Tool " + tc.name.value + " needs permission under "
@@ -2175,7 +2175,7 @@ Cmd kick_pending_tools(Model& m) {
                 if (auto g = m.d.grant_def_hash.find(tc.name.value);
                     g != m.d.grant_def_hash.end()) {
                     tc.approved_def_hash = g->second;
-                } else if (const auto* allowed = tools::find(tc.name.value)) {
+                } else if (const auto allowed = tools::find(tc.name.value)) {
                     tc.approved_def_hash = allowed->definition_hash();
                 }
             }
@@ -2779,7 +2779,7 @@ Cmd load_plugins_async(bool reconnect) {
                 // WARM path (add/remove/toggle) the pool already exists, so we
                 // also run reload_mcp_plugins() to re-sync it to the edited
                 // config. Order matters: build-if-cold, then reload.
-                (void)tools::registry();
+                (void)tools::wire_tools();
                 (void)tools::reload_mcp_plugins();
             }
             out.send(Msg{PluginsUpdated{mcp::plugin_model()}});

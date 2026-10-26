@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
         if (!sb::init(sb::Mode::On)) { std::puts("no sandbox backend"); return 1; }
         std::printf("%s\n", sb::describe_state().c_str());
     }
-    (void)tools::registry();
+    tools::warm_registry();
 
     // Pick a real file in the tree for read/outline-style cases.
     std::string some_file = "README.md";
@@ -87,7 +87,7 @@ int main(int argc, char** argv) {
     const char* only = std::getenv("AGENTTY_BENCH_ONLY");   // profile one case
     for (const auto& c : cases) {
         if (only && std::string_view{c.label} != only) continue;
-        const auto* td = tools::find(c.tool);
+        const auto td = tools::find(c.tool);
         if (!td) { std::printf("%-18s  (tool not registered)\n", c.label); continue; }
         std::vector<long> us;
         bool ok = true;

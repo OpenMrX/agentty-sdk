@@ -244,7 +244,7 @@ http::Headers build_request_headers(const AuthHeader& auth,
 std::string machine_id_hex(int nibbles) {
     static std::string cached;
     static std::once_flag once;
-    std::call_once(once, [] {
+    maya::once(once, [] {
         std::string seed;
         for (auto path : {"/etc/machine-id", "/var/lib/dbus/machine-id"}) {
             std::ifstream f(path);
@@ -278,7 +278,7 @@ std::string make_user_id() {
     // copy of Claude Code's `T7H()` shape and with no fake account_uuid.
     static std::string cached;
     static std::once_flag once;
-    std::call_once(once, []{
+    maya::once(once, []{
         auto device_id = machine_id_hex(32);
         auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
         uint64_t s1 = 0xcbf29ce484222325ull;

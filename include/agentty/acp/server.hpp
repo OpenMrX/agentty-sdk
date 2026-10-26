@@ -119,11 +119,23 @@ public:
     //
     // Build it with maya::co_owned<AgentServer>::make(...): turn workers hold
     // a handle to it, so it must outlive any turn still running.
+    //
+    // Optional seams, fixed at construction so every field a worker reads is
+    // const (the MAYA_SYNC claim below holds by construction, not by "set it
+    // before serve()").
+    struct Extras {
+        // Routes a session whose model lives on another provider. Without it
+        // the model list is the active provider's.
+        StreamToFn                        stream_to;
+        // Re-reads credentials after a terminal login the editor ran for us.
+        std::function<auth::AuthHeader()> reauth;
+    };
     AgentServer(rpc::Channel      channel,
                 StreamFn          stream,
                 auth::AuthHeader  auth,
                 std::string       model_id,
-                Profile           profile = Profile::Ask);
+                Profile           profile = Profile::Ask,
+                Extras            extras  = {});
     ~AgentServer();
 
     // Start reading and block until the client disconnects (EOF on stdin).
@@ -282,12 +294,9 @@ private:
     // Set in the constructor, then only read; turn workers read them too.
     const std::unique_ptr<rpc::Peer> peer_;
     const StreamFn                   stream_;
-    // Optional: routes a session whose model lives on another provider. Set
-    // once before serve(); without it the model list is the active provider's.
-    StreamToFn                       stream_to_;
-  public:
-    void set_stream_to(StreamToFn f) { stream_to_ = std::move(f); }
-  private:
+    // Optional: routes a session whose model lives on another provider
+    // (Extras::stream_to).
+    const StreamToFn                 stream_to_;
     // Every model the session selector offers, across signed-in providers.
     // Built lazily on first use and kept for the connection: listing catalogs
     // can hit the network, and the dropdown shouldn't wait on it twice. A
@@ -306,12 +315,9 @@ private:
     // snapshot, replaced whole, read lock-free.
     maya::snapshot<auth::AuthHeader> auth_;
     [[nodiscard]] auth::AuthHeader auth() const { return auth_.get(); }
-  public:
-    // Re-reads credentials (after a terminal login the editor ran for us).
-    // Set by main(); without it `authenticate` can only report the state.
-    void set_reauth(std::function<auth::AuthHeader()> f) { reauth_ = std::move(f); }
-  private:
-    std::function<auth::AuthHeader()> reauth_;
+    // Re-reads credentials (Extras::reauth); without it `authenticate` can
+    // only report the state.
+    const std::function<auth::AuthHeader()> reauth_;
     void on_authenticate(const ::acp::AuthenticateParams&);
 
     // Did the client advertise `terminal` support at initialize? When true
@@ -375,7 +381,7 @@ private:
 } // namespace agentty::acp
 
 // Checked by hand (jaal can't walk a class with private fields and a base):
-// every field is const after construction, a guarded, or an atomic, except
+// every field is const, a guarded, a snapshot/published, or an atomic, except
 // router_, which only the peer's reader thread touches. Turn workers and the
 // reader share the server through co_owned<AgentServer>.
 MAYA_SYNC(agentty::acp::AgentServer);

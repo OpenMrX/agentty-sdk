@@ -386,7 +386,7 @@ std::pair<Model, Cmd> init() {
         // turn finds the snapshot already built. (When MCP config IS present,
         // load_plugins_async above already touches registry() and warms it.)
         cmds.push_back(Cmd::task_isolated(
-            [](maya::Sink<Msg>, std::stop_token) { (void)tools::registry(); }));
+            [](maya::Sink<Msg>, std::stop_token) { tools::warm_registry(); }));
 
     // OpenAI-family backends (Ollama, llama.cpp, groq, …) have no fixed
     // built-in model list — seed_models() only knows Claude ids. A saved

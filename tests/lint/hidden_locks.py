@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """hidden_locks: blocking waits that jaal's lock order can't see.
 
-  atomic_wait  atomic::wait() — with a compare-exchange it's a hand-made mutex
-  call_once    std::call_once — every other caller waits while the body runs
   spin         this_thread::yield() in a loop waiting on another thread
 
-The banlist covers std::mutex/thread/atomic, but an allowed atomic can still
-become a lock. Each site below was checked by hand: it never waits while a
-jaal lock is held, and the body/holder doesn't take one. A new site needs the
-same check, then a line here saying why.
+atomic::wait and std::call_once used to be listed here. They are types now:
+maya::atomic_wait needs `unlocked`, and maya::once runs its body as a leaf
+(a lock or wait inside aborts), so the banlist refuses the raw spellings and
+no hand check is needed. A spin can't be made a type: each site below was
+checked by hand to wait only on a syscall-length window with no jaal lock
+held. A new site needs the same check, then a line here saying why.
 
 Usage: hidden_locks.py ROOT
 """
@@ -23,34 +23,6 @@ from disk_writes import strip  # noqa: E402
 EXTS = (".cpp", ".hpp", ".h")
 
 RULES = {
-    "atomic_wait": (
-        r"(\.|->)wait\s*\(\s*([\w.>-]+\s*,\s*std::memory_order\w*|true|false)\s*\)",
-        {
-            # one handshake at a time; the holder waits only on the server
-            "src/mcp/bridge.cpp",
-            # one call / one reconnect per server; a queued call honours stop
-            "src/mcp/connection.cpp",
-            # waits for its own signal watcher to start, nothing held
-            "src/runtime/run_cli.cpp",
-        },
-    ),
-    "call_once": (
-        r"\bstd::call_once\b",
-        {
-            "src/io/cred_crypt.cpp",       # passphrase; first asked on main()
-            "src/io/tls.cpp",              # OpenSSL init
-            "src/io/auth.cpp",             # sets a bool
-            "src/io/blob_gc.cpp",          # registers + posts the gc job
-            "src/io/http.cpp",             # WSAStartup
-            "src/mcp/oauth.cpp",           # WSAStartup
-            "src/provider/anthropic/transport.cpp",  # reads env
-            "src/tool/subagent.cpp",       # registers a teardown
-            "src/util/user_root.cpp",      # local legacy-dir migration
-            "src/util/modelsdev.cpp",      # registers + posts the refresh
-            "include/agentty/domain/lazy_bytes.hpp",   # blob file read
-            "include/agentty/domain/conversation.hpp", # base64 encode
-        },
-    ),
     "spin": (
         r"\bthis_thread::yield\s*\(",
         {

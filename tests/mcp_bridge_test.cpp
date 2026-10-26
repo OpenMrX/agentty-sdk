@@ -127,7 +127,8 @@ int main() {
     CHECK(add != nullptr);
 
     if (add) {
-        auto r = agentty::tool::DynamicDispatch::execute_with(agtest::cap(), add, add->name.value, nlohmann::json{{"a", 17}, {"b", 25}}, agentty::tools::CallContext{});
+        auto r = agentty::tool::DynamicDispatch::execute_with(agtest::cap(), tools::Found::of(*add),
+            add->name.value, nlohmann::json{{"a", 17}, {"b", 25}}, agentty::tools::CallContext{});
         CHECK(r.has_value());
         if (r) {
             std::printf("  add(17,25) -> %s\n", r->text.c_str());
@@ -182,7 +183,9 @@ int main() {
     for (const auto& t : tools) if (t.name.value == "mcp_read_resource") read_res = &t;
     CHECK(read_res != nullptr);
     if (read_res) {
-        auto listing = agentty::tool::DynamicDispatch::execute_with(agtest::cap(), read_res, read_res->name.value, nlohmann::json::object(), agentty::tools::CallContext{});
+        auto listing = agentty::tool::DynamicDispatch::execute_with(agtest::cap(),
+            tools::Found::of(*read_res), read_res->name.value, nlohmann::json::object(),
+            agentty::tools::CallContext{});
         CHECK(listing.has_value());
         if (listing) CHECK(listing->text.find("motd") != std::string::npos);
     }

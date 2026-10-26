@@ -64,3 +64,6 @@ agentty/util/child_process.hpp: atomic
 # reader alike; holding a guarded across reconnect would block every
 # caller behind a subprocess spawn.
 agentty/mcp/connection.hpp: atomic
+# Peer's default call timeout: MCP narrows it after the handshake while the
+# reader runs, and every call reads it. A relaxed atomic, never waited on.
+agentty/rpc/peer.hpp: atomic

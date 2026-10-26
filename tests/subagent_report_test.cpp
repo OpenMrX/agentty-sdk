@@ -76,7 +76,7 @@ bool has(const std::string& hay, std::string_view needle) {
 struct TaskOut { std::string text; bool is_error = false; };
 
 TaskOut run_task(const std::string& prompt, const tools::CallContext& ctx = {}) {
-    const auto* td = tool::DynamicDispatch::resolve("task");
+    const auto td = tool::DynamicDispatch::resolve("task");
     if (!td) return {"[task tool missing from registry]", true};
     json args; args["prompt"] = prompt;
     // Production dispatch, as cmd_factory does: execute_with stamps the

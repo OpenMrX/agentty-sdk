@@ -102,7 +102,7 @@ maya::stop_group& runs() {
 // the code that creates the thread, not in a hand-maintained list in main().
 void ensure_teardown_registered() {
     static std::once_flag once;
-    std::call_once(once, [] {
+    maya::once(once, [] {
         util::teardown::on_shutdown("subagent.running", [](const maya::unlocked& cap) {
             (void)shutdown_running(cap);
         });

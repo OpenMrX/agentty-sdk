@@ -1592,9 +1592,9 @@ Cmd stream_update(Model& m, msg::StreamMsg sm) {
                 if (auto* tcp2 = find_streaming_tool(e.id);
                     tcp2 && tcp2->is_pending() && !tcp2->args.is_null()) {
                     auto& tc2 = *tcp2;
-                    const auto* def = tools::find(tc2.name.value);
+                    const auto def = tools::find(tc2.name.value);
                     const bool read_only =
-                        def != nullptr
+                        def
                         && !def->scheduling_effects.has(tools::Effect::WriteFs)
                         && !def->scheduling_effects.has(tools::Effect::Exec)
                         && !def->scheduling_effects.has(tools::Effect::Net);

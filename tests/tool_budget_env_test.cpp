@@ -38,7 +38,7 @@ static void check(bool ok, const std::string& what) {
 // ToolDef::name is the strong Id<ToolNameTag> — compare via its .value.
 static std::size_t demo_tools_on_wire() {
     std::size_t n = 0;
-    for (const auto& t : tools::wire_tools_snapshot())
+    for (const auto& t : (*tools::wire_tools()))
         if (t.name.value.rfind("mcp__demo__", 0) == 0) ++n;
     return n;
 }
@@ -93,7 +93,7 @@ int main() {
     // date_server advertises exactly 2 tools (current_date, days_between).
     constexpr std::size_t kN = 2;
 
-    (void)tools::registry();            // triggers connect_initial_mcp
+    tools::warm_registry();            // triggers connect_initial_mcp
     (void)tools::reload_mcp_plugins();  // fresh connected pool
 
     // The native count is machine/config-dependent — derive the budget from
@@ -151,7 +151,7 @@ int main() {
         check(on_wire == 1,
               "wire projection trims MCP tools past the budget (demo tools "
               "on wire=" + std::to_string(on_wire) + ", want 1)");
-        check(tools::wire_tools_snapshot().size() == native + on_wire,
+        check((*tools::wire_tools()).size() == native + on_wire,
               "wire catalog stays native + room worth of MCP tools");
     }
 

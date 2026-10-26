@@ -8,6 +8,7 @@
 // the one caller that flips `started` and stopped with `unlocked`.
 
 #include "agentty/runtime/app/settings_cache.hpp"
+#include "agentty/util/callback.hpp"
 
 #include <cstdint>
 #include <memory>
@@ -60,8 +61,8 @@ maya::guarded<State>& state() {
 // fire the "settings were written" observer (which would invalidate the
 // cache from its own write -- what the old thread-id check guarded against).
 struct Disk {
-    std::function<store::Settings()>                                 load;
-    std::function<void(const maya::unlocked&, const store::Settings&)> save;
+    util::Callback<store::Settings()>                                 load;
+    util::Callback<void(const maya::unlocked&, const store::Settings&)> save;
 };
 maya::published<const Disk>& disk() {
     static maya::published<const Disk> d;
@@ -124,7 +125,7 @@ void start_worker(const maya::below<maya::leaf>& cap) {
 Seam wrap(const maya::unlocked& cap, std::function<store::Settings()> load_from_disk,
           std::function<void(const maya::unlocked&, const store::Settings&)> save_to_disk) {
     disk().publish(std::make_shared<const Disk>(
-        Disk{std::move(load_from_disk), std::move(save_to_disk)}));
+        Disk{{std::move(load_from_disk)}, {std::move(save_to_disk)}}));
     // A re-install (provider switch rebuilds Deps) must not resurrect a stale
     // cache from the previous store.
     state().with(cap, [](State& s) {

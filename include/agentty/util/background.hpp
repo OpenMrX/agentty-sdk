@@ -213,11 +213,13 @@ class WorkerGroup {
     void stop(const maya::unlocked& cap) noexcept { group_.stop(cap); }
 
   private:
-    std::string_view   where_;
-    maya::worker_group group_;
+    const std::string_view where_;
+    maya::worker_group     group_;
 };
 
 } // namespace agentty::util
 
 // ~WorkerGroup joins its jobs: never inside a maya::guarded<T>.
 MAYA_JOINS_ON_DESTROY(agentty::util::WorkerGroup);
+// A const label plus a worker_group, which is Sync: many threads may post.
+MAYA_SYNC(agentty::util::WorkerGroup);

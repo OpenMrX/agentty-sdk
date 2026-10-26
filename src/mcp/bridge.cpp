@@ -63,7 +63,12 @@
 #include "agentty/util/logx.hpp"
 #include "agentty/util/lock_levels.hpp"
 
-
+// mcp::cap::Registry, read through const: every const member walks the
+// provider list (never written after the pool's build) and calls a provider.
+// The providers here are agentty::mcp::Connection (Sync: a guarded gate per
+// server, published Live). So many threads may read one built Registry at
+// once. jaal can't see it: private fields of a library type.
+MAYA_FROZEN(::mcp::cap::Registry);
 
 namespace agentty::mcp {
 
@@ -89,12 +94,11 @@ struct ConnectionPool {
     // cannot detect collisions with agentty's native catalog.
     //
     // Threading: a pool is BUILT by one mcp_tools() call and only then
-    // published (current_pool). `policies` and `connect_errors` are written
-    // during the build and never after, so readers of a published pool need
-    // no lock for them. The registry too is filled during the build and only
-    // read after, and `generation` is an atomic counter.
+    // published, as `const` (current_pool): the type says nothing changes
+    // after the build. The one exception is `generation`, a mutable atomic
+    // that list_changed bumps; jaal's Sync walk accepts it as such.
     ::mcp::cap::Registry registry{true};
-    std::atomic<unsigned long> generation{0};   // bumps on any *_list_changed
+    mutable std::atomic<unsigned long> generation{0};   // bumps on any *_list_changed
     std::unordered_map<std::string, ServerPolicy> policies;
     // Why a configured server did NOT connect this session (empty entry =
     // connected fine). Filled during the build so plugin_model() can show
@@ -133,8 +137,8 @@ namespace {
 // the current handle and keep it alive for their call; a rebuild publishes
 // a new pool without freeing the old one under them. ConnectionPool is safe
 // to share once published (see its threading note).
-maya::published<ConnectionPool>& g_pool() {
-    static maya::published<ConnectionPool> p;
+maya::published<const ConnectionPool>& g_pool() {
+    static maya::published<const ConnectionPool> p;
     return p;
 }
 
@@ -147,8 +151,8 @@ maya::published<ConnectionPool>& g_pool() {
 // The pool a rebuild replaced. Destroying it stops its servers (joins their
 // peers), which must not happen under g_connecting(); it waits here and
 // mcp_tools() drops it after the gate.
-maya::published<ConnectionPool>& g_retired() {
-    static maya::published<ConnectionPool> r;
+maya::published<const ConnectionPool>& g_retired() {
+    static maya::published<const ConnectionPool> r;
     return r;
 }
 
@@ -1384,17 +1388,22 @@ std::vector<std::string> configured_server_names_from_client() {
 }
 
 namespace {
-std::vector<tools::ToolDef> build_pool(PoolHandle& out_pool);
+std::vector<tools::ToolDef> build_pool(const maya::unlocked& cap, PoolHandle& out_pool);
 }
 
 std::vector<tools::ToolDef> mcp_tools(PoolHandle& out_pool) {
+    // A reviewed root (tests/lint/allowlist.txt): the callers are the catalog
+    // accessor's connect step and mcp_reload(), both on workers, and the
+    // registry never reaches here from a lock body. The waits below check
+    // that at runtime: one inside a lock body aborts instead of hanging.
+    return maya::thread_root([&](const maya::unlocked& cap) {
     // Serialize the whole connect+swap — no two builds ever run at once.
     // build_pool publishes the pool itself, so out_pool reads it back.
     auto& gate = g_connecting();
     bool expected = false;
     while (!gate.compare_exchange_weak(expected, true, std::memory_order_acquire)) {
         // Block until the holder releases (atomic wait, not a sleep-poll).
-        if (expected) gate.wait(true, std::memory_order_acquire);
+        if (expected) maya::atomic_wait(cap, gate, true, std::memory_order_acquire);
         expected = false;
     }
     auto release = [&gate] {
@@ -1404,17 +1413,18 @@ std::vector<tools::ToolDef> mcp_tools(PoolHandle& out_pool) {
     std::vector<tools::ToolDef> defs;
     try {
         PoolHandle built;
-        defs = build_pool(built);
+        defs = build_pool(cap, built);
     } catch (...) { release(); throw; }
     release();
     // The replaced pool dies here, with no lock held.
     (void)g_retired().replace(nullptr);
     out_pool = current_pool();
     return defs;
+    });
 }
 
 namespace {
-std::vector<tools::ToolDef> build_pool(PoolHandle& out_pool) {
+std::vector<tools::ToolDef> build_pool(const maya::unlocked& cap, PoolHandle& out_pool) {
     std::vector<tools::ToolDef> out;
 
     // ONE ladder. This used to resolve a single winning file while
@@ -1454,7 +1464,7 @@ std::vector<tools::ToolDef> build_pool(PoolHandle& out_pool) {
     // tools/list_changed (+ resources/prompts) from any server bumps the
     // pool generation. Callers compare mcp_generation() to know the snapshot
     // moved; the dispatch path keeps working regardless (it routes by name).
-    auto bump_on_change = [wp = std::weak_ptr<ConnectionPool>(pool)] {
+    auto bump_on_change = [wp = std::weak_ptr<const ConnectionPool>(pool)] {
         if (auto p = wp.lock())
             p->generation.fetch_add(1, std::memory_order_relaxed);
     };
@@ -1479,7 +1489,7 @@ std::vector<tools::ToolDef> build_pool(PoolHandle& out_pool) {
         // A plain future, not a shared_future. It was shared only so the
         // orphan-waiter below could keep a timed-out connect alive; the pool
         // owns the job now, so nothing else needs a handle on it.
-        std::future<std::shared_ptr<::mcp::cap::CapabilityProvider>> fut;
+        maya::job_result<std::shared_ptr<::mcp::cap::CapabilityProvider>> fut;
     };
     std::vector<Pending> pending;
     // Per-server trust set, loaded once. For a workspace-local config that
@@ -1582,7 +1592,7 @@ std::vector<tools::ToolDef> build_pool(PoolHandle& out_pool) {
         auto remaining = deadline - std::chrono::steady_clock::now();
         if (remaining < std::chrono::milliseconds{0})
             remaining = std::chrono::milliseconds{0};
-        if (pend.fut.wait_for(remaining) != std::future_status::ready) {
+        if (!pend.fut.wait_for(cap, remaining)) {
             std::fprintf(stderr,
                 "mcp: server '%s' did not connect within the deadline — skipping\n",
                 pend.name.c_str());
@@ -1597,7 +1607,7 @@ std::vector<tools::ToolDef> build_pool(PoolHandle& out_pool) {
             // absorb a blocking future destructor somewhere other than here.
             continue;
         }
-        auto p = pend.fut.get();
+        auto p = pend.fut.get(cap);
         if (p) {
             std::fprintf(stderr,
                 "mcp: server '%s' connected (%zu tools, %zu resources, %zu prompts)\n",

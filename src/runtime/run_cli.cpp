@@ -161,7 +161,7 @@ tools::OneShotResult run_with_signals(const maya::unlocked& cap, const Options& 
     auto w = maya::co_owned<Watch>::make();
     tools::OneShotResult result = maya::scope(cap, [&](maya::nursery& n) {
         auto watcher = n.spawn(watch_signals, w, deadline);
-        w->ready.wait(false);                 // signals are installed before the run
+        maya::atomic_wait(cap, w->ready, false);   // signals are installed before the run
         if (w->failed) return tools::run_one_shot(cap, to_one_shot(o, {}));
         struct Stop {   // the watcher stops however the run ends
             const Watch& w;

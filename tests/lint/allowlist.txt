@@ -168,7 +168,10 @@ provider/kimi/kimi_oauth.cpp: atomic
 # to absorb that stall is gone too, along with the shared_future it needed.
 # The pool is published whole (maya::published) and the seen-tools cache is
 # maya::guarded; `atomic` is the pool's list-changed generation counter.
-mcp/bridge.cpp: atomic
+# `cap_mint`: mcp_tools() is a reviewed root. Its callers (the catalog's
+# connect step, mcp_reload) run on workers and never inside a lock body;
+# its waits are maya::atomic_wait / job_result, so a lie aborts there.
+mcp/bridge.cpp: atomic cap_mint
 # http_server: POST workers are a util::WorkerGroup and the session is
 # maya::guarded. The atomic is the liveness flag the provider reads.
 mcp/http_server.cpp: atomic

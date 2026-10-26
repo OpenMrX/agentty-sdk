@@ -451,7 +451,7 @@ void Peer::Core::ticker(const maya::unlocked& cap, std::stop_token st) {
 
 jsonrpc::Completed Peer::call_raw(const maya::unlocked& cap, std::string_view method,
                                   jsonrpc::Json params, CallOptions o) {
-    const auto t = o.timeout.value_or(default_timeout_);
+    const auto t = o.timeout.value_or(default_timeout_.load(std::memory_order_relaxed));
     const jsonrpc::Deadline deadline =
         t.count() > 0 ? jsonrpc::Deadline{Clock::now() + t} : jsonrpc::Deadline{};
 

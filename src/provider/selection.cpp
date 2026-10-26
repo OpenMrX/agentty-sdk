@@ -28,8 +28,6 @@ namespace agentty::provider {
 namespace {
 // Read by the UI thread (views, reducers) and by workers, replaced wholesale
 // by select(): a published immutable value, so active() needs no capability.
-// (Selection carries a registry row pointer, so it is not Shareable and
-// can't be a maya::snapshot; it is never mutated after publish.)
 maya::published<const Selection>& g_active() {
     static maya::published<const Selection> s;
     return s;

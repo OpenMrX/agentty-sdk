@@ -24,6 +24,7 @@
 // supplies; it runs on the reader thread, outside the engine lock, so a
 // handler may itself call<> the peer without deadlocking.
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -154,8 +155,12 @@ public:
     // connection's. Waits: `unlocked`.
     void wait_closed(const maya::unlocked&);
 
-    // Deadline for calls that pass none. Zero means no deadline.
-    void set_default_timeout(std::chrono::milliseconds d) { default_timeout_ = d; }
+    // Deadline for calls that pass none. Zero means no deadline. Callable any
+    // time, from any thread (MCP narrows it after the handshake, while the
+    // reader is already running).
+    void set_default_timeout(std::chrono::milliseconds d) noexcept {
+        default_timeout_.store(d, std::memory_order_relaxed);
+    }
     void set_request_meta(const maya::below<maya::leaf>&, jsonrpc::Json meta);
 
     // ── to the peer ─────────────────────────────────────────────────────
@@ -253,7 +258,7 @@ private:
     void end_batch(const maya::below<maya::leaf>&) noexcept;
 
     core_t                    core_;
-    std::chrono::milliseconds default_timeout_{0};
+    std::atomic<std::chrono::milliseconds> default_timeout_{std::chrono::milliseconds{0}};
     maya::pool                pool_{3};   // reader, writer, ticker
 };
 
@@ -262,6 +267,10 @@ private:
 // A Peer joins its reader/writer/ticker when destroyed: never inside a
 // maya::guarded<T> (jaal refuses the type), so its destructor may wait.
 MAYA_JOINS_ON_DESTROY(agentty::rpc::Peer);
+// Every member is safe from any thread: the core is co_owned Sync state
+// (guarded Shared/Outbox, const channel), the timeout is atomic, the pool is
+// Sync. So many threads may call one Peer at once.
+MAYA_SYNC(agentty::rpc::Peer);
 
 // A deferred reply is a handle the dispatch hands to whoever answers later.
 // A Deferred owns a handle to the peer's core (co_owned), the call's id and a

@@ -105,46 +105,45 @@ const std::vector<ToolDef>& native_registry() {
 }
 
 namespace {
-// Snapshots are immutable and never freed: dispatch resolves a ToolDef
-// pointer once and may run for minutes, so a refresh must not invalidate it.
-// Each snapshot keeps the one it replaced alive through `prev`.
+// One build of the catalog. Immutable once published; readers hold the
+// Catalog handle for as long as they use a ToolDef, so a rebuild never
+// invalidates anything and the old build dies with its last reader.
 struct Snapshot {
-    std::vector<ToolDef> tools;
-    std::unordered_map<std::string, const ToolDef*> idx;
+    Catalog tools;
+    std::unordered_map<std::string, std::size_t> idx;   // name -> index in *tools
     unsigned long generation = 0;
     bool stale = false;   // marker published by invalidation; never served
-    std::shared_ptr<const Snapshot> prev;
 };
 
 enum class Phase { Idle, Connecting, Connected };
-// Lock-free: registry() is read from everywhere (views, lock bodies, tool
+// Lock-free: the catalog is read from everywhere (views, lock bodies, tool
 // workers), so the connect claim is one atomic and the first connect's
 // result is published once. No capability on the catalog path.
 std::atomic<Phase>& connect_phase() { static std::atomic<Phase> p{Phase::Idle}; return p; }
+// The two slots are leaked: a tool worker abandoned at the shutdown grace
+// may still read them while statics are torn down. What they point at is
+// refcounted and dies with its last reader, so this is one allocation each,
+// not a growing chain.
 maya::published<const std::vector<ToolDef>>& initial_mcp() {
     static auto* s = new maya::published<const std::vector<ToolDef>>;
     return *s;
 }
-// Leaked on purpose: snapshots live for the whole process, and tearing down
-// a long `prev` chain at exit would only recurse.
 maya::published<const Snapshot>& catalog() {
     static auto* c = new maya::published<const Snapshot>;
     return *c;
 }
 
-void index(Snapshot& s) {
-    s.idx.reserve(s.tools.size());
-    for (const auto& tool : s.tools) s.idx.emplace(tool.name.value, &tool);
+std::shared_ptr<const Snapshot> make_snapshot(std::vector<ToolDef> tools, unsigned long generation) {
+    std::unordered_map<std::string, std::size_t> idx;
+    idx.reserve(tools.size());
+    for (std::size_t i = 0; i < tools.size(); ++i) idx.emplace(tools[i].name.value, i);
+    return std::make_shared<const Snapshot>(
+        Snapshot{Catalog::make(std::move(tools)), std::move(idx), generation, false});
 }
 
 // Served while another thread is mid-connect, so nobody waits on it.
 std::shared_ptr<const Snapshot> native_only() {
-    static const std::shared_ptr<const Snapshot> s = [] {
-        auto ns = std::make_shared<Snapshot>();
-        ns->tools = native_registry();
-        index(*ns);
-        return std::shared_ptr<const Snapshot>(std::move(ns));
-    }();
+    static const std::shared_ptr<const Snapshot> s = make_snapshot(native_registry(), 0);
     return s;
 }
 
@@ -208,24 +207,20 @@ std::shared_ptr<const Snapshot> refresh_wire_cache(Connect may = Connect::May) {
             external = mcp::mcp_tools_live();
         }
 
-        auto next = std::make_shared<Snapshot>();
-        next->tools.reserve(native_registry().size() + external.size());
-        next->tools.insert(next->tools.end(), native_registry().begin(), native_registry().end());
+        std::vector<ToolDef> tools;
+        tools.reserve(native_registry().size() + external.size());
+        tools.insert(tools.end(), native_registry().begin(), native_registry().end());
 
         // External names are namespaced, but still drop duplicates rather
         // than send ambiguous schemas to a provider.
         std::unordered_map<std::string, bool> names;
-        names.reserve(next->tools.capacity());
-        for (const auto& tool : next->tools) names.emplace(tool.name.value, true);
+        names.reserve(tools.capacity());
+        for (const auto& tool : tools) names.emplace(tool.name.value, true);
         for (auto& tool : external) {
             if (!names.emplace(tool.name.value, true).second) continue;
-            next->tools.push_back(std::move(tool));
+            tools.push_back(std::move(tool));
         }
-        index(*next);
-        next->generation = generation;
-        next->prev = cur;
-
-        std::shared_ptr<const Snapshot> out = std::move(next);
+        auto out = make_snapshot(std::move(tools), generation);
         if (catalog().publish_if(cur, out)) return out;
         // Someone else published (a rebuild or an invalidation); re-check.
     }
@@ -236,15 +231,12 @@ void invalidate_catalog() {
     for (;;) {
         auto cur = catalog().current();
         if (!cur) return;
-        auto marker = std::make_shared<Snapshot>();
-        marker->stale = true;
-        marker->prev = cur;
+        auto marker = std::make_shared<const Snapshot>(
+            Snapshot{cur->tools, cur->idx, cur->generation, /*stale=*/true});
         if (catalog().publish_if(cur, std::move(marker))) return;
     }
 }
 } // namespace
-
-const std::vector<ToolDef>& registry() { return wire_tools(); }
 
 // Legacy tool-name aliases → canonical registry name. The exec tool was renamed
 // bash → shell, but `bash` is so dominant in model training data (it is Claude
@@ -283,7 +275,7 @@ std::string unknown_tool_error(std::string_view name) {
         + ". This tool is not part of agentty's toolset — if a proxy or "
           "gateway advertised it, call it through that channel, not here. "
           "Available tools:";
-    for (const auto& td : wire_tools()) {
+    for (const auto& td : *wire_tools()) {
         msg += ' ';
         msg += td.name.value;
         msg += ',';
@@ -293,27 +285,18 @@ std::string unknown_tool_error(std::string_view name) {
     return msg;
 }
 
-const ToolDef* find(std::string_view name) {
+Found find(std::string_view name) {
     const auto snapshot = refresh_wire_cache(Connect::Never);
     if (auto it = snapshot->idx.find(std::string{name}); it != snapshot->idx.end())
-        return it->second;
+        return Found{snapshot->tools, &(*snapshot->tools)[it->second]};
     // Miss: retry once under the canonical name so a legacy alias resolves.
     if (auto canon = canonical_tool_name(name); canon != name)
         if (auto it = snapshot->idx.find(std::string{canon}); it != snapshot->idx.end())
-            return it->second;
-    return nullptr;
+            return Found{snapshot->tools, &(*snapshot->tools)[it->second]};
+    return Found{};
 }
 
-const std::vector<ToolDef>& wire_tools() {
-    const auto snapshot = refresh_wire_cache();
-    return snapshot->tools;
-}
-
-std::vector<ToolDef> wire_tools_snapshot() {
-    // A copy the caller owns; safe on any thread that may overlap a reload.
-    const auto snapshot = refresh_wire_cache();
-    return snapshot->tools;   // deep copy while snapshot keeps it alive
-}
+Catalog wire_tools() { return refresh_wire_cache()->tools; }
 
 bool withheld_by_policy(const ToolDef& tool, bool web_search_enabled) {
     return !web_search_enabled && tool.origin == ToolOrigin::Native
@@ -325,11 +308,13 @@ bool withheld_by_policy(const ToolDef& tool) {
         tool, web_search_cfg::mode(web_search_policy::current()) != web_search_cfg::Mode::Off);
 }
 
-std::vector<const ToolDef*> select_wire_tools(
+Selected select_wire_tools(
     std::string_view query, std::size_t max_external) {
-    return select_wire_tools_from(wire_tools(), query, max_external,
-                                  web_search_cfg::mode(web_search_policy::current())
-                                      != web_search_cfg::Mode::Off);
+    Catalog cat = wire_tools();
+    auto picked = select_wire_tools_from(*cat, query, max_external,
+                                         web_search_cfg::mode(web_search_policy::current())
+                                             != web_search_cfg::Mode::Off);
+    return Selected{std::move(cat), std::move(picked)};
 }
 
 std::vector<const ToolDef*> select_wire_tools_from(

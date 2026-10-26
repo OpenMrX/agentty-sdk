@@ -25,9 +25,10 @@
 // is anything borrowed in there. Tool arguments and results are json, so
 // they cross to worker threads constantly.
 //
-// Sendable, not Frozen: a json is freely mutable through a non-const
-// reference, and nothing here pretends otherwise.
+// A json owns a tree of values: no views, no shared pointees, no mutable
+// members, so nothing reachable from a const json& can change.
 MAYA_SENDABLE(nlohmann::json);
+MAYA_FROZEN(nlohmann::json);
 
 // Id<Tag> is a strong newtype around ONE std::string, by value, no views and
 // no pointers. jaal can't look inside only because it has user-declared
@@ -38,9 +39,6 @@ MAYA_SENDABLE_T(agentty::Id<Tag>);
 template <class Tag>
 MAYA_FROZEN_T(agentty::Id<Tag>);
 
-// std::filesystem::path owns one string (its native form); a moved path
-// shares nothing with the source.
-MAYA_SENDABLE(std::filesystem::path);
-
 // EffectSet is one std::uint8_t of flags behind accessors.
 MAYA_SENDABLE(agentty::tools::EffectSet);
+MAYA_FROZEN(agentty::tools::EffectSet);

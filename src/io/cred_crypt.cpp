@@ -11,6 +11,7 @@
 #include <string_view>
 
 #include <nlohmann/json.hpp>
+#include <maya/runtime.hpp>   // maya::once
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
 #include <openssl/rand.h>
@@ -168,7 +169,7 @@ std::optional<std::string> prompt_passphrase() {
 const std::optional<std::string>& resolve_passphrase() {
     static std::once_flag once;
     static std::optional<std::string> cached;
-    std::call_once(once, [] {
+    maya::once(once, [] {
         if (const char* p = std::getenv("AGENTTY_PASSPHRASE"); p && *p) {
             cached = std::string{p};
             return;

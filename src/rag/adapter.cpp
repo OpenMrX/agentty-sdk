@@ -14,11 +14,13 @@
 //     mcp://<uri>            this session's MCP resources (opt-in)
 
 #include "agentty/rag/rag_adapter.hpp"
+#include "agentty/util/callback.hpp"
 #include "agentty/rag/rag_host.hpp"
 #include "agentty/rag/vector_cache.hpp"
 #include "agentty/io/shared_file.hpp"
 
 #include "agentty/util/background.hpp"
+#include "agentty/util/sendable.hpp"
 #include "agentty/util/logx.hpp"
 
 // agentty's retrieval engine is rag-cpp. On platforms where rag-cpp isn't
@@ -1814,6 +1816,9 @@ struct WarmState {
 };
 using WarmRef = maya::co_owned<WarmState>;
 
+// The HyDE / multi-query generator as published: invoked, never reassigned.
+using GeneratorFn = util::Callback<std::vector<std::string>(const std::string&, int)>;
+
 struct Retriever::Impl {
     WarmRef               warm = WarmRef::make();
     std::atomic<bool>&    warming   = warm->warming;
@@ -1823,11 +1828,12 @@ struct Retriever::Impl {
     // Optional LLM seam for HyDE / multi-query. Outside the index: it is a
     // closure that may dial out, so retrieve() takes a snapshot of it and
     // never calls user code it can't see through the lock's own rules.
-    maya::published<const Retriever::Generator> generator;
+    maya::published<const GeneratorFn> generator;
 
     Impl() {
-        generator.publish(std::make_shared<const Retriever::Generator>(
-            Index::default_generator(api_root([&](const maya::unlocked& c) { return index.read(c, [](const Index& ix) { return ix.cfg; }); }))));
+        generator.publish(std::make_shared<const GeneratorFn>(GeneratorFn{
+            Index::default_generator(api_root([&](const maya::unlocked& c) {
+                return index.read(c, [](const Index& ix) { return ix.cfg; }); }))}));
     }
 
     // LAST data member ON PURPOSE: members destroy in reverse order, so the
@@ -1847,14 +1853,14 @@ Retriever::Retriever() : impl_(std::make_unique<Impl>()) {}
 Retriever::~Retriever() = default;
 
 void Retriever::set_generator(Generator g) {
-    impl_->generator.publish(std::make_shared<const Generator>(std::move(g)));
+    impl_->generator.publish(std::make_shared<const GeneratorFn>(GeneratorFn{std::move(g)}));
 }
 
 // A shared handle on the current HyDE generator, handed into the index lock.
 // The generator is a user closure: the default one dials a local Ollama and
 // touches no agentty lock; a set_generator() one is the caller's, and was
 // always called under the index lock, so this keeps that contract as is.
-struct GeneratorRef { std::shared_ptr<const Retriever::Generator> fn; };
+struct GeneratorRef { std::shared_ptr<const GeneratorFn> fn; };
 } // namespace agentty::rag
 MAYA_SENDABLE(agentty::rag::GeneratorRef);
 namespace agentty::rag {
@@ -1863,7 +1869,7 @@ namespace {
 // The body of retrieve(), run with the index locked.
 Retrieval retrieve_locked(Index& ix, const std::string& query, int kk, bool skip_docs,
                           const GeneratorRef& gref) {
-    const Retriever::Generator* generator = gref.fn.get();
+    const auto* generator = gref.fn.get();
     Retrieval out;
     auto root = skip_docs ? fs::path{}
                           : resolve_docs_root(ix.cfg.docs_root);
@@ -2752,8 +2758,8 @@ void Retriever::apply_config(const Config& cfg) {
         // The default generator dials the embed host when that is an
         // Ollama, so a new embedder means a new default generator.
         if (ch.embedder)
-            impl_->generator.publish(std::make_shared<const Generator>(
-                Index::default_generator(snapshot_config())));
+            impl_->generator.publish(std::make_shared<const GeneratorFn>(
+                GeneratorFn{Index::default_generator(snapshot_config())}));
     } catch (...) { /* best-effort; keep the old config live on failure */ }
   });
 }

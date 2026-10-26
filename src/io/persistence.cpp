@@ -1,4 +1,5 @@
 #include "agentty/io/persistence.hpp"
+#include "agentty/util/callback.hpp"
 #include "agentty/io/blob_store.hpp"
 #include "agentty/io/thread_log.hpp"
 #include "agentty/runtime/settings_registry.hpp"
@@ -3280,8 +3281,9 @@ namespace {
 void save_settings_locked(persistence::Held held, const store::Settings& s);
 // The observer waits (a cache drains its queue on it), so it is handed the
 // caller's `unlocked`. Published, not locked: set once by the cache.
-maya::published<const std::function<void(const maya::unlocked&)>>& settings_observer() {
-    static maya::published<const std::function<void(const maya::unlocked&)>> o;
+using SettingsObserver = util::Callback<void(const maya::unlocked&)>;
+maya::published<const SettingsObserver>& settings_observer() {
+    static maya::published<const SettingsObserver> o;
     return o;
 }
 void notify_written(const maya::unlocked& cap);
@@ -3755,7 +3757,7 @@ void save_settings_locked(persistence::Held held, const store::Settings& s) {
 
 void on_settings_written(std::function<void(const maya::unlocked&)> observer) {
     settings_observer().publish(
-        std::make_shared<const std::function<void(const maya::unlocked&)>>(std::move(observer)));
+        std::make_shared<const SettingsObserver>(SettingsObserver{std::move(observer)}));
 }
 
 // 64 random bits as 16 hex digits. Zero-padded so every id is fixed width:

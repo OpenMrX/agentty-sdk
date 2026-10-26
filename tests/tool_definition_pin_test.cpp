@@ -139,8 +139,8 @@ TEST_CASE("definition pin: a zero hash means unchecked, not denied") {
 }
 
 TEST_CASE("definition pin: a matching hash runs the tool") {
-    const auto* td = agentty::tools::find("read");
-    REQUIRE(td != nullptr);
+    const auto td = agentty::tools::find("read");
+    REQUIRE(td);
     auto result = agentty::tool::DynamicDispatch::execute_approved(
         agtest::cap(), "read", json{{"path", "/definitely/not/a/real/file"}},
         td->definition_hash(), agentty::tools::CallContext{});

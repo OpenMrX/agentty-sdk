@@ -282,5 +282,7 @@ void prewarm_active_provider(Io);
 } // namespace agentty::provider
 
 // Selection is plain data plus `row`, which only ever points into the
-// constexpr kProviders table (static, immutable). Safe to copy across threads.
+// constexpr kProviders table (static, immutable). Safe to copy across threads,
+// and nothing reachable from a const one can change.
 MAYA_SENDABLE(agentty::provider::Selection);
+MAYA_FROZEN(agentty::provider::Selection);

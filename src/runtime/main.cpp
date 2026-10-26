@@ -2378,18 +2378,19 @@ int run_main(int argc, char** argv, const maya::unlocked& cap) {
             },
             provider_auth,
             std::move(model_id),
-            profile);
-        // Lets a session pick a model on any signed-in provider, not just
-        // the active one (Zed's model dropdown lists them all).
-        server->set_stream_to([stream_to_fn](const maya::unlocked& c, const std::string& pid,
-                                             provider::Request r, provider::EventSink s) {
-            (void)stream_to_fn(c, pid, std::move(r), std::move(s));
-        });
-        // After the editor runs `agentty login` for us, `authenticate` re-reads
-        // the store with this.
-        server->set_reauth([provider_spec] {
-            return provider::credentials::resolve(IoAccess::grant(), provider_spec);
-        });
+            profile,
+            agentty::acp::AgentServer::Extras{
+                // Lets a session pick a model on any signed-in provider, not
+                // just the active one (Zed's model dropdown lists them all).
+                .stream_to = [stream_to_fn](const maya::unlocked& c, const std::string& pid,
+                                            provider::Request r, provider::EventSink s) {
+                    (void)stream_to_fn(c, pid, std::move(r), std::move(s));
+                },
+                // After the editor runs `agentty login` for us, `authenticate`
+                // re-reads the store with this.
+                .reauth = [provider_spec] {
+                    return provider::credentials::resolve(IoAccess::grant(), provider_spec);
+                }});
         std::fprintf(stderr, "agentty: ACP agent ready on stdio (profile=%s)\n",
                      std::string(to_string(profile)).c_str());
         int rc = server->serve(cap);

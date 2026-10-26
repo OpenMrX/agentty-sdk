@@ -10,6 +10,7 @@
 #include <maya/runtime.hpp>
 
 #include "agentty/util/logx.hpp"
+#include "agentty/util/callback.hpp"
 
 namespace agentty::util::teardown {
 
@@ -18,7 +19,7 @@ namespace {
 struct Entry {
     Token                         token;
     std::string                   name;
-    teardown::Action              fn;
+    util::Callback<void(const maya::unlocked&)> fn;   // invoked, never reassigned
 };
 
 // Copy-on-write: register/cancel publish a new list with compare-and-swap.
@@ -60,7 +61,7 @@ Token on_shutdown(std::string name, teardown::Action action) {
     if (!action) return 0;
     return update([&](Registry& r) {
         const Token token = r.next_token++;
-        r.actions.push_back(Entry{token, name, action});
+        r.actions.push_back(Entry{token, name, {action}});
         return token;
     });
 }

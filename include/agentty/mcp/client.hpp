@@ -56,7 +56,7 @@ namespace agentty::mcp {
 // — survive exactly as long as some tool can still be invoked. Defined in
 // src/mcp/bridge.cpp; callers treat it as a token they hold but never inspect.
 struct ConnectionPool;
-using PoolHandle = std::shared_ptr<ConnectionPool>;
+using PoolHandle = std::shared_ptr<const ConnectionPool>;
 
 // Connect to every MCP server named in the config and synthesize a ToolDef
 // for each tool each server advertises (via `initialize` + `tools/list`).

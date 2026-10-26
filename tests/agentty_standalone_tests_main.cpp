@@ -142,7 +142,7 @@ int main(int argc, char** argv) {
     //
     // A worker spawned inside a test still has no token, so the guarantee is
     // intact where it matters.
-    const maya::loop_identity loop_id;
+    const auto loop_id = maya::arm_loop_for_tests();
     // Build the sub-argv: keep argv[0] as the REAL executable path (a test may
     // re-exec itself — external_acp_backend_test spawns argv[0] as a fake ACP
     // agent), drop the dispatch name at argv[1], keep the rest as the test's

@@ -3,6 +3,7 @@
 // ExternalAcpBackend — see include/agentty/provider/external_acp_backend.hpp.
 
 #include "agentty/provider/external_acp_backend.hpp"
+#include "agentty/util/callback.hpp"
 
 #include <chrono>
 #include <algorithm>
@@ -401,8 +402,8 @@ TurnResult ExternalAcpBackend::prompt(const maya::unlocked&       cap,
     // reader thread) reach it. Cleared on scope exit — a late update becomes a
     // no-op, never a second terminal event.
     {
-        auto round = std::make_shared<Round>();
-        round->sink = [&sink](acp::SessionUpdate su) { sink(std::move(su)); };
+        auto round = std::make_shared<Round>(util::Callback<void(acp::SessionUpdate)>{
+            [&sink](acp::SessionUpdate su) { sink(std::move(su)); }});
         round_.publish(std::move(round));
     }
     struct RoundGuard {

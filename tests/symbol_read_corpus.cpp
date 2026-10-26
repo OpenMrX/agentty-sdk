@@ -24,7 +24,7 @@ int main(int argc, char** argv) {
     if (argc < 2) { std::printf("usage: symbol_read_corpus <corpus.tsv> [--verbose]\n"); return 2; }
     const bool verbose = argc > 2 && std::string{argv[2]} == "--verbose";
     tools::util::set_workspace_root(::agentty::IoAccess::grant(), "/");
-    const auto* read = tools::find("read");
+    const auto read = tools::find("read");
     if (!read) { std::printf("read tool not registered\n"); return 1; }
     std::ifstream in(argv[1]);
     std::string line;

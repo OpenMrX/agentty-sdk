@@ -56,7 +56,7 @@ void check(bool ok, const std::string& what) {
 
 // Dispatch through the production path — exactly what cmd_factory does.
 tools::ExecResult run(std::string_view name, json args) {
-    const auto* td = tools::find(name);
+    const auto td = tools::find(name);
     if (!td) return std::unexpected(tools::ToolError::unknown(
         "tool not in registry: " + std::string{name}));
     return tool::DynamicDispatch::execute_with(agtest::cap(), td, name, args,
@@ -122,10 +122,10 @@ int main() {
 
     // ── Registry completeness: every catalog tool must be advertised. ──
     {
-        const auto& reg = tools::registry();
+        const auto reg = tools::wire_tools();
         for (const auto& spec : tools::spec::kCatalog) {
-            const auto* td = tools::find(spec.name);
-            check(td != nullptr,
+            const auto td = tools::find(spec.name);
+            check(static_cast<bool>(td),
                   std::string{"registry advertises '"} + std::string{spec.name} + "'");
             if (!td) continue;
             check(td->input_schema.is_object(),
@@ -136,7 +136,7 @@ int main() {
                   std::string{spec.name} + ": execute closure installed");
         }
         // Recall-bias ordering: read/edit lead, host shells trail.
-        check(!reg.empty() && reg.front().name.value == "read",
+        check(!reg->empty() && reg->front().name.value == "read",
               "wire order: 'read' listed first");
     }
 
@@ -147,7 +147,8 @@ int main() {
         throwing.name.value = "throwing_test_tool";
         throwing.execute = [](const maya::unlocked&, const json&, const tools::CallContext&) -> tools::ExecResult { throw 7; };
         auto guarded = tool::DynamicDispatch::execute_with(
-            agtest::cap(), &throwing, throwing.name.value, json::object(), tools::CallContext{});
+            agtest::cap(), tools::Found::of(std::move(throwing)), "throwing_test_tool",
+            json::object(), tools::CallContext{});
         check(!guarded && guarded.error().kind == tools::ErrorKind::Unknown,
               "dispatch: contains non-standard tool exceptions");
     }
@@ -601,7 +602,7 @@ int main() {
         tools::util::set_workspace_root(::agentty::IoAccess::grant(), root);
         fs::current_path(prior_cwd);
 
-        const auto* remember_def = tools::find("remember");
+        const auto remember_def = tools::find("remember");
         const auto scope_enum = remember_def
             ? remember_def->input_schema["properties"]["scope"]["enum"]
             : json{};

@@ -49,6 +49,8 @@
 #include "agentty/provider/acp_backend.hpp"    // AcpBackend, TurnSink, TurnResult
 #include "agentty/provider/provider.hpp"       // provider::Request
 #include "agentty/rpc/peer.hpp"                // rpc::Peer, rpc::Dispatch
+#include "agentty/util/callback.hpp"
+#include "agentty/util/sendable.hpp"           // util::Callback
 
 namespace agentty::provider {
 
@@ -185,8 +187,8 @@ private:
     // round on exit and waits for in-flight calls, so the sink (which points at
     // prompt's stack) is never called after it returns. No round: updates drop.
     struct Round {
-        std::function<void(acp::SessionUpdate)> sink;
-        maya::stop_group                        inflight;
+        const util::Callback<void(acp::SessionUpdate)> sink;   // set at build, then only called
+        maya::stop_group                               inflight;
     };
     maya::published<Round> round_;
 

@@ -201,7 +201,7 @@ namespace {
 void ensure_net_init() {
 #if defined(_WIN32)
     static std::once_flag once;
-    std::call_once(once, []{
+    maya::once(once, []{
         WSADATA data;
         (void)WSAStartup(MAKEWORD(2, 2), &data);
     });

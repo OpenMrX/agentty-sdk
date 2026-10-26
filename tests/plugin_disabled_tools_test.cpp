@@ -101,7 +101,7 @@ int main() {
     constexpr std::size_t kN = 2;
 
     // 1. Connect → the server advertises its tools; snapshot records them.
-    (void)tools::registry();          // triggers connect_initial_mcp
+    tools::warm_registry();          // triggers connect_initial_mcp
     (void)tools::reload_mcp_plugins(); // ensure a fresh connected pool
     const std::size_t connected = tool_count_for("demo");
     check(connected == kN,

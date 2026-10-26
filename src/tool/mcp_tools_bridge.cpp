@@ -46,13 +46,6 @@
 #include <utility>
 #include <vector>
 
-namespace agentty::tools::tool_state {
-// See GuardedToolState below.
-struct FnRef { const std::function<void(::mcp::tools::ToolState&)>* fn; };
-}  // namespace agentty::tools::tool_state
-MAYA_SENDABLE(agentty::tools::tool_state::FnRef);
-MAYA_SENDABLE(mcp::tools::ToolState);
-
 namespace agentty::tools {
 
 namespace {
@@ -423,11 +416,13 @@ ExecResult decode_result(const std::string& tool_name, ::mcp::cap::Result r) {
 // the other); they are copied in on every access, so there is one source of
 // truth and nothing to mirror.
 //
-// The tools hand us a function to run on the state. guarded<T> refuses an
-// opaque callable as an argument, because it could take a second lock while
-// this one is held. These can't: mcp-cpp holds no locks and starts nothing
-// (its concurrency allowlist is empty), and every with() body in it only
-// reads and writes ToolState. So the one callable type is opted in here.
+// The tools hand us a function to run on the state. Its shape is the
+// library's (a std::function<void(ToolState&)> that may capture anything),
+// so it goes through guarded::with_foreign, the one jaal entry that runs a
+// borrowed callback under a lock. Sound because mcp-cpp holds no locks and
+// starts nothing (its concurrency allowlist is empty), and every with() body
+// in it only reads and writes ToolState (process.cpp, repomap.cpp, fs.cpp,
+// call_state.hpp); one that blocked would trip held_top() at the wait.
 //
 // Lock order: the state is a LEAF. StateAccess::with is mcp-cpp's virtual,
 // called from inside a tool body with a signature it fixes, so it can't be
@@ -442,8 +437,7 @@ ExecResult decode_result(const std::string& tool_name, ::mcp::cap::Result r) {
 // Session only runs Session::stop() (an atomic and an eventfd write; see
 // JaalSession in tool/util/exec.cpp). So erasing an entry inside with() is
 // safe even when it drops the session.
-using StateFn    = std::function<void(mt::ToolState&)>;
-using StateFnRef = tool_state::FnRef;
+using StateFn = std::function<void(mt::ToolState&)>;
 
 class GuardedToolState final : public mt::StateAccess {
   public:
@@ -464,14 +458,13 @@ class GuardedToolState final : public mt::StateAccess {
     void with(const StateFn& f) override {
         auto ws    = util::workspace_root();
         auto roots = util::read_roots_now();
-        maya::thread_root([&](const maya::unlocked& cap) {
-            st_.with(cap, [](mt::ToolState& s, StateFnRef fn,
-                             std::filesystem::path w, std::vector<std::filesystem::path> r) {
-                s.workspace_root = std::move(w);
-                s.read_roots     = std::move(r);
-                (*fn.fn)(s);
-            }, StateFnRef{&f}, std::move(ws), std::move(roots));
-        });
+        // One hold: the scope fields and the body see each other atomically.
+        auto body = [&](mt::ToolState& s) {
+            s.workspace_root = std::move(ws);
+            s.read_roots     = std::move(roots);
+            f(s);
+        };
+        maya::thread_root([&](const maya::unlocked& cap) { st_.with_foreign(cap, body); });
     }
   private:
     maya::guarded<mt::ToolState> st_;

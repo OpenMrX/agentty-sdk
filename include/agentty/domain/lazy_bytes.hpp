@@ -55,6 +55,8 @@
 #include <string>
 #include <utility>
 
+#include <maya/runtime.hpp>   // maya::once
+
 namespace agentty {
 
 class LazyBytes {
@@ -141,7 +143,7 @@ private:
 
         const std::string& bytes() const {
             if (!done.load(std::memory_order_acquire)) {
-                std::call_once(once_, [this] {
+                maya::once(once_, [this] {
                     auto r  = resolver_.load(std::memory_order_acquire);
                     bytes_  = r ? r(source) : std::string{};
                     done.store(true, std::memory_order_release);

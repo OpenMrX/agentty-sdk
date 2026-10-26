@@ -25,17 +25,31 @@
 
 namespace agentty::provider {
 
+// One spawned agent + the backend that drives it. Cached per agent id: the
+// subprocess is long-lived, its ACP session reused across requests.
+//
+// Built once by acquire(), then published read-only. Teardown is the LAST
+// holder's: release_acp_agents() only drops the cache's reference, so a turn
+// still inside backend->prompt() on another thread keeps both alive until it
+// returns. It used to reset them in place under that turn.
+struct LiveAgent {
+    std::unique_ptr<ExternalAcpBackend> backend;
+    SpawnedAcpAgent                     agent;   // owns the subprocess and peer; dies first
+    // The peer's dispatch points at the backend, so the peer goes first.
+    ~LiveAgent() { agent.reset(); }
+};
+
+} // namespace agentty::provider
+// Both members are set by acquire() before the map is published and never
+// reassigned; what readers call on them is the backend's prompt() (one round
+// at a time, guarded inside) and the peer (Sync). Joins on destroy (the peer).
+MAYA_SYNC(agentty::provider::LiveAgent);
+MAYA_JOINS_ON_DESTROY(agentty::provider::LiveAgent);
+namespace agentty::provider {
 namespace {
 
 namespace a = acp;
 using json = nlohmann::json;
-
-// One spawned agent + the backend that drives it. Cached per agent id: the
-// subprocess is long-lived, its ACP session reused across requests.
-struct LiveAgent {
-    std::unique_ptr<ExternalAcpBackend> backend;
-    SpawnedAcpAgent                     agent;   // owns the subprocess and peer; dies first
-};
 
 // Copy-on-write: readers look up without a lock, a spawn publishes a new map.
 using AgentMap = std::unordered_map<std::string, std::shared_ptr<LiveAgent>>;
@@ -293,15 +307,10 @@ StreamResult stream_external_acp(const maya::unlocked& cap, const std::string& a
 }
 
 void release_acp_agents(const maya::unlocked&) noexcept {
+    // Drop the cache. Each agent is torn down by whoever holds it last (here,
+    // unless a turn is still running), bounded even for a wedged agent.
     auto drained = g_cache().take();
-    if (!drained) return;
-    // Each agent's teardown is bounded even for a wedged agent.
-    for (const auto& [id, live] : *drained) {
-        if (!live) continue;
-        // The peer first: its dispatch points at the backend.
-        live->agent.reset();
-        live->backend.reset();
-    }
+    (void)drained;
 }
 
 } // namespace agentty::provider

@@ -332,17 +332,42 @@ struct ToolDef {
     }
 };
 
-[[nodiscard]] const std::vector<ToolDef>& native_registry();
-[[nodiscard]] const std::vector<ToolDef>& registry();
+// The catalog as one immutable object every reader shares. A reader holds
+// the handle for as long as it uses a ToolDef from it (a dispatch may run for
+// minutes); a reload publishes a new one and the old dies with its last
+// reader. maya::shared, not a shared_ptr: only make() builds one and it
+// checks the vector is Frozen, so no one can hold a mutable alias to it.
+using Catalog = maya::shared<std::vector<ToolDef>>;
 
-// Race-safe value copy of the current wire catalog. Unlike registry() /
-// wire_tools() — which return a reference into cache-owned memory that a
-// concurrent reload_mcp_plugins() (background thread) can swap out from
-// under the caller — this returns an independent snapshot the caller owns.
-// Use this from any path that might run while a plugin reload is in flight
-// (e.g. the settings picker reading the catalog to list plugin tools).
-[[nodiscard]] std::vector<ToolDef> wire_tools_snapshot();
-[[nodiscard]] const ToolDef* find(std::string_view name);
+[[nodiscard]] const std::vector<ToolDef>& native_registry();
+
+// The tool set to advertise on the wire for THIS turn: the native tools plus
+// every MCP tool the pool knows right now (a server's `tools/list_changed`
+// lands here on the next call). The first call may connect external MCP,
+// which takes seconds; find() never does.
+[[nodiscard]] Catalog wire_tools();
+// Warm the catalog (connect MCP if configured). Same as wire_tools() with
+// the result dropped; for the init task that pays the cold cost off-thread.
+inline void warm_registry() { (void)wire_tools(); }
+
+// Look a tool up by name (legacy aliases resolve). The ToolDef lives as long
+// as the returned catalog does, so the pair is handed back together; a
+// caller that keeps the pointer keeps the handle beside it.
+struct Found {
+    std::optional<Catalog> catalog;      // empty when not found
+    const ToolDef* def = nullptr;
+    [[nodiscard]] explicit operator bool() const noexcept { return def != nullptr; }
+    const ToolDef* operator->() const noexcept { return def; }
+    const ToolDef& operator*()  const noexcept { return *def; }
+    // A def that isn't in the catalog (a test's own, a just-built MCP def):
+    // copied into a one-entry catalog so the handle still owns what it points at.
+    [[nodiscard]] static Found of(ToolDef d) {
+        auto c = Catalog::make(std::vector<ToolDef>{std::move(d)});
+        const ToolDef* p = &c->front();
+        return Found{std::move(c), p};
+    }
+};
+[[nodiscard]] Found find(std::string_view name);
 
 // Actionable "unknown tool" diagnostic. A bare "unknown tool: X" strands
 // the model — observed in the field when a LiteLLM-style proxy in front of
@@ -353,17 +378,18 @@ struct ToolDef {
 // snapshot it enumerates.
 [[nodiscard]] std::string unknown_tool_error(std::string_view name);
 
-// The tool set to advertise on the wire for THIS turn. Equals registry()
-// plus any MCP tools that appeared after startup via a `tools/list_changed`
-// notification (and minus any that vanished). When MCP is unconfigured or no
-// server has changed its list since startup, this returns registry() verbatim
-// (no allocation, no copy). The per-turn provider walk should iterate this,
-// not registry(), so a server adding a tool mid-session reaches the model on
-// the next turn. Dispatch (`find`) already resolves these names live.
-[[nodiscard]] const std::vector<ToolDef>& wire_tools();
 // Build a bounded per-turn catalog: all native/pinned tools plus the external
-// MCP tools most relevant to the current user request.
-[[nodiscard]] std::vector<const ToolDef*> select_wire_tools(
+// MCP tools most relevant to the current user request. The pointers point
+// into `catalog`, which the result keeps alive.
+struct Selected {
+    Catalog                     catalog;
+    std::vector<const ToolDef*> tools;
+    [[nodiscard]] auto begin() const noexcept { return tools.begin(); }
+    [[nodiscard]] auto end()   const noexcept { return tools.end(); }
+    [[nodiscard]] bool empty() const noexcept { return tools.empty(); }
+    [[nodiscard]] std::size_t size() const noexcept { return tools.size(); }
+};
+[[nodiscard]] Selected select_wire_tools(
     std::string_view query, std::size_t max_external = 16);
 // Same selection over an explicit catalog (pure; for tests). Natives and
 // pinned tools always; the top `max_external` other tools by query score,
@@ -410,11 +436,15 @@ void invalidate_mcp_catalog(Io);
 
 } // namespace agentty::tools
 
-// ToolDef is plain data plus `execute`, a std::function jaal can't see
-// inside. The closures it holds capture shared handles (a provider, the MCP
-// pool) that synchronise themselves, or nothing at all; none borrows from
-// the place it was built. So a ToolDef can be copied to another thread.
-MAYA_SENDABLE(agentty::tools::ToolDef);
+// ToolBody is a closure that is only ever invoked. What it captures (a
+// provider, the MCP pool) synchronises itself, or is nothing; none borrows
+// from where it was built. So a ToolDef can move to another thread and many
+// threads may read one at once.
+MAYA_SENDABLE(agentty::tools::ToolBody);
+MAYA_FROZEN(agentty::tools::ToolBody);
+// Found's pointer points into the Frozen catalog it carries, so moving the
+// pair moves the ownership with it: nothing borrowed is left behind.
+MAYA_SENDABLE(agentty::tools::Found);
 
 // Owned values, stop_tokens (thread-safe handles), and `progress`, a closure
 // the dispatcher builds to post into a Sink or a guarded buffer. A tool call

@@ -1068,13 +1068,16 @@ AgentServer::AgentServer(rpc::Channel      channel,
                          StreamFn          stream,
                          auth::AuthHeader  auth,
                          std::string       model_id,
-                         Profile           profile)
+                         Profile           profile,
+                         Extras            extras)
     : router_(make_router()),
       peer_(std::make_unique<rpc::Peer>(std::move(channel), make_dispatch(), "acp")),
       stream_(std::move(stream)),
+      stream_to_(std::move(extras.stream_to)),
       model_id_(std::move(model_id)),
       profile_(profile),
-      auth_(std::move(auth)) {
+      auth_(std::move(auth)),
+      reauth_(std::move(extras.reauth)) {
     // A dead client must not wedge a worker forever: our calls to it
     // (permission, terminal/*) fail with Timeout after this. 5 min is
     // generous for a human reading a permission dialog.
@@ -3223,8 +3226,7 @@ bool AgentServer::run_tools(const Cap& cap, const std::string& session_id, bool&
         // Resolve the tool ONCE so the permission gate and the execution run
         // against the same definition (an mcp/tools/list_changed mid-turn can
         // otherwise re-resolve the name to a ToolDef with different effects).
-        const tools::ToolDef* td =
-            tool::DynamicDispatch::resolve(tc.name.value);
+        const tools::Found td = tool::DynamicDispatch::resolve(tc.name.value);
 
         bool needs_perm =
             tool::DynamicDispatch::needs_permission_with(td, profile)
@@ -3406,7 +3408,7 @@ bool AgentServer::run_tools(const Cap& cap, const std::string& session_id, bool&
         call_ctx.cancel.push_back(abandon.get_token());
         auto fut = util::background_pool().submit_isolated(
             [](const maya::unlocked& job_cap, std::stop_token pool_stop,
-               std::optional<tools::ToolDef> def,
+               tools::Found def,
                std::string name, nlohmann::json args, std::stop_source wake,
                tools::CallContext call_ctx) {
                 struct Signal {
@@ -3415,11 +3417,9 @@ bool AgentServer::run_tools(const Cap& cap, const std::string& session_id, bool&
                 } on_exit{wake};
                 // Process teardown stops the pool: the tool must see it too.
                 call_ctx.cancel.push_back(std::move(pool_stop));
-                return tool::DynamicDispatch::execute_with(job_cap, def ? &*def : nullptr,
-                                                           name, args, call_ctx);
+                return tool::DynamicDispatch::execute_with(job_cap, def, name, args, call_ctx);
             },
-            td ? std::optional<tools::ToolDef>{*td} : std::nullopt,
-            tc.name.value, tc.args, wake, std::move(call_ctx));
+            td, tc.name.value, tc.args, wake, std::move(call_ctx));
         std::optional<std::stop_callback<std::function<void()>>> on_cancel;
         if (ctx.cancel)
             on_cancel.emplace(ctx.cancel->token(),
@@ -3439,8 +3439,7 @@ bool AgentServer::run_tools(const Cap& cap, const std::string& session_id, bool&
 
         // Finished beats cancelled: a tool that completed in the same instant
         // the user cancelled has a real result, and reporting it is honest.
-        const bool finished =
-            fut.wait_for(std::chrono::seconds{0}) == std::future_status::ready;
+        const bool finished = fut.ready();
         const bool tool_cancelled =
             !finished && woke && ctx.cancelled();
         const bool tool_timed_out = !finished && !woke;
@@ -3468,7 +3467,7 @@ bool AgentServer::run_tools(const Cap& cap, const std::string& session_id, bool&
         // job and breaks the promise. Fail this tool rather than the turn.
         std::optional<tool::ExecResult> got;
         try {
-            got = fut.get();
+            got = fut.get(cap);
         } catch (const std::exception& e) {
             util::dbglog("acp.run_tools.submit", e.what());
             set_status(tc, ToolUse::Failed{{}, {}, std::string{"could not run tool: "} + e.what()});
