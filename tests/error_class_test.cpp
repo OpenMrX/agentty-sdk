@@ -494,6 +494,107 @@ TEST_CASE("learned rejected field is omitted from the next body (#93)") {
     agentty::set_rejected_fields({});   // reset global state
 }
 
+// #117: a thinking-mode model 400s a history whose earlier assistant turns
+// lack reasoning_content. Bodies verbatim from the issue and the trackers
+// that hit the same thing (Kilo#15198, opencode#23831, 9router#4804).
+TEST_CASE("parse_reasoning_echo_required: the issue's bodies and its neighbours") {
+    using agentty::provider::parse_reasoning_echo_required;
+    using R = agentty::provider::ReasoningEcho;
+
+    // Beam, as #117 reported it: every earlier turn.
+    CHECK(parse_reasoning_echo_required(
+              "400 Bad Request: Missing required parameter: "
+              "'messages[3].reasoning_content'. This model needs the reasoning of "
+              "every earlier assistant message: send back the 'reasoning_content' "
+              "returned with that message. If 'reasoning_content' is not available, "
+              "consider starting a new session or conversation history.", 400)
+          == R::All);
+    // The same through a gateway that wraps it (9router / OpenCode Zen).
+    CHECK(parse_reasoning_echo_required(
+              "Upstream request failed: [missing_required_parameter] Missing required "
+              "parameter: 'messages[36].reasoning_content'. This model needs the "
+              "reasoning of every earlier assistant message: send back the "
+              "'reasoning_content' returned with that message.", 400) == R::All);
+    // An SSE error frame carries no status.
+    CHECK(parse_reasoning_echo_required(
+              "Missing required parameter: 'messages[1].reasoning_content'. This model "
+              "needs the reasoning of every earlier assistant message", 0) == R::All);
+    // Kimi / Moonshot: tool-call turns.
+    CHECK(parse_reasoning_echo_required(
+              "thinking is enabled but reasoning_content is missing in assistant tool "
+              "call message at index 2", 400) == R::ToolCalls);
+    // DeepSeek names no scope; its docs say tool-call turns.
+    CHECK(parse_reasoning_echo_required(
+              "The `reasoning_content` in the thinking mode must be passed back to "
+              "the API.", 400) == R::ToolCalls);
+
+    // Neighbours that must NOT be learned away.
+    CHECK(parse_reasoning_echo_required("messages[3].reasoning_content must be a string", 400)
+          == R::None);                                   // a value error, not a missing turn
+    CHECK(parse_reasoning_echo_required("Missing required parameter: 'messages'", 400)
+          == R::None);                                   // a real error
+    CHECK(parse_reasoning_echo_required("property 'prompt_cache_key' is unsupported", 400)
+          == R::None);                                   // #93's, not ours
+    CHECK(parse_reasoning_echo_required(
+              "Missing required parameter: 'messages[3].reasoning_content'", 500)
+          == R::None);                                   // 5xx is transient, not a contract
+    CHECK(parse_reasoning_echo_required("", 400) == R::None);
+}
+
+TEST_CASE("learned reasoning echo is per host AND model, and fills the body (#117)") {
+    namespace oa = agentty::provider::openai;
+    using agentty::reasoning_echo_for;
+    using agentty::reasoning_echo_key;
+
+    agentty::set_reasoning_echoes({});
+    oa::Request r;
+    r.endpoint   = oa::Endpoint::from_spec("openrouter");
+    r.model      = "moonshotai/kimi-k2-thinking";
+    r.max_tokens = 64;
+    agentty::Message u; u.role = agentty::Role::User; u.text = "q";
+    agentty::Message a; a.role = agentty::Role::Assistant; a.text = "from another model";
+    r.messages = {u, a, u};
+    auto asst = [&] {
+        for (const auto& m : oa::build_request_body(r)["messages"])
+            if (m["role"] == "assistant") return m;
+        return nlohmann::json{};
+    };
+
+    const auto host = agentty::host_key(r.endpoint.host, r.endpoint.port);
+    CHECK(reasoning_echo_for(host, r.model) == 0);
+    CHECK(!asst().contains("reasoning_content"));        // nobody asked: body unchanged
+
+    agentty::set_reasoning_echo(reasoning_echo_key(host, r.model), 2);
+    CHECK(reasoning_echo_for(host, r.model) == 2);
+    CHECK(asst()["reasoning_content"] == " ");
+    // Spelling-insensitive, like every caps key.
+    CHECK(reasoning_echo_for(host, "moonshotai/Kimi-K2-Thinking") == 2);
+
+    // Another model on the same gateway is NOT padded...
+    CHECK(reasoning_echo_for(host, "openai/gpt-4o") == 0);
+    r.model = "openai/gpt-4o";
+    CHECK(!asst().contains("reasoning_content"));
+    // ...and the same model on another host is learned separately.
+    CHECK(reasoning_echo_for("api.groq.com", "moonshotai/kimi-k2-thinking") == 0);
+
+    // Beam is seeded under every name it ships as, so a model switch onto it
+    // never pays the first 400.
+    CHECK(reasoning_echo_for("gen.pollinations.ai",
+                             "community/YoannDev90/vercel-beam:free") == 2);
+    CHECK(reasoning_echo_for("ai-gateway.vercel.sh", "reflection/beam-free") == 2);
+    CHECK(reasoning_echo_for("ai-gateway.vercel.sh", "reflection/beam") == 2);
+    CHECK(reasoning_echo_for("opencode.ai", "cat-jam-free") == 2);
+    CHECK(reasoning_echo_for("x", "stealth/cat-jam:free") == 2);
+    // ...and nothing that merely contains "beam".
+    CHECK(reasoning_echo_for("x", "someone/beamformer-7b") == 0);
+    CHECK(reasoning_echo_for("x", "beam") == 0);
+    // Learned beats seeded.
+    agentty::set_reasoning_echo(reasoning_echo_key("x", "reflection/beam"), 1);
+    CHECK(reasoning_echo_for("x", "reflection/beam") == 1);
+
+    agentty::set_reasoning_echoes({});   // reset global state
+}
+
 TEST_CASE("parse_effort_rejection: ollama think-value + minimal harvesting") {
     using agentty::provider::parse_effort_rejection;
     using agentty::Effort;

@@ -386,6 +386,65 @@ enum class OptionalField : std::uint8_t {
     return OptionalField::None;
 }
 
+// ── Required reasoning echo → learned contract (#117) ────────────────────
+// The mirror image of OptionalField: a field the server wants ADDED, not
+// dropped. Thinking-mode models want each earlier assistant turn's
+// reasoning sent back, and they 400 a history that lacks it:
+//   Beam (Reflection; Vercel / Pollinations / OpenCode Zen gateways):
+//     "Missing required parameter: 'messages[3].reasoning_content'. This
+//      model needs the reasoning of every earlier assistant message: …"
+//   Kimi / Moonshot:
+//     "thinking is enabled but reasoning_content is missing in assistant
+//      tool call message at index 2"
+//   DeepSeek:
+//     "The `reasoning_content` in the thinking mode must be passed back to
+//      the API."
+// Turns this model streamed already send their reasoning back (Message::
+// reasoning_wire_field). What no echo can fix is a turn with nothing to send:
+// it came from another model, or this one didn't reason that turn. The
+// contract says which turns must carry the field anyway, and the transport
+// fills them in (openai::build_messages).
+//
+// Scope is the ONE thing the bodies disagree on, and it is load-bearing:
+// DeepSeek and Kimi only check tool-call turns, Beam checks every turn.
+enum class ReasoningEcho : std::uint8_t {
+    None      = 0,   // no requirement known
+    ToolCalls = 1,   // assistant turns that made a tool call
+    All       = 2,   // every assistant turn
+};
+[[nodiscard]] inline ReasoningEcho parse_reasoning_echo_required(
+        std::string_view message, int http_status) noexcept {
+    if (http_status != 0 && http_status != 400 && http_status != 422)
+        return ReasoningEcho::None;
+    auto lower = [](char c) noexcept {
+        return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + 32) : c;
+    };
+    auto icontains = [&](std::string_view needle) noexcept {
+        if (needle.size() > message.size()) return false;
+        for (std::size_t i = 0; i + needle.size() <= message.size(); ++i) {
+            std::size_t k = 0;
+            while (k < needle.size() && lower(message[i + k]) == needle[k]) ++k;
+            if (k == needle.size()) return true;
+        }
+        return false;
+    };
+    // Must name the field AND say it is absent. "reasoning_content must be a
+    // string" is a value error, not a missing turn; filling turns would not
+    // fix it and must not be tried.
+    if (!icontains("reasoning_content")) return ReasoningEcho::None;
+    const bool missing = icontains("missing") || icontains("is required")
+                      || icontains("must be passed back")
+                      || icontains("needs the reasoning");
+    if (!missing) return ReasoningEcho::None;
+    // Beam says outright that it is every turn. Kimi names a tool call
+    // message; DeepSeek's sentence has no scope, and its docs say tool-call
+    // turns. Unscoped: start narrow; the next 400 (if any) widens it.
+    if (icontains("every earlier assistant") || icontains("all assistant")
+        || icontains("every assistant"))
+        return ReasoningEcho::All;
+    return ReasoningEcho::ToolCalls;
+}
+
 // ── reasoning_effort rejection → learned capability ──────────────────────
 // Parse a 4xx body that REJECTS the reasoning_effort parameter and extract
 // what the provider says it accepts — this is capability DISCOVERY, not a

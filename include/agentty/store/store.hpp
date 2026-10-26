@@ -227,6 +227,12 @@ struct Settings {
     // by the reject→learn→retry arm in stream.cpp (#93), hydrated at init
     // so the transport never sends that host the field again.
     std::map<std::string, std::uint8_t> rejected_fields;
+    // LEARNED: "host|model" → which earlier assistant turns that model needs
+    // reasoning_content on (provider::ReasoningEcho: 1 tool-call turns, 2
+    // every turn). Written by the reject→learn→retry arm in stream.cpp
+    // (#117), hydrated at init. Keyed by model as well as host: one gateway
+    // serves strict and lax models side by side.
+    std::map<std::string, std::uint8_t> reasoning_echo;
     // Tool names the user granted "always allow" (PermissionApproveAlways).
     // Persisted so the grant survives restarts — Zed's always_allow rules.
     // Loaded into Model::session_grants at init; note CycleProfile still

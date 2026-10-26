@@ -2283,6 +2283,54 @@ Cmd stream_update(Model& m, msg::StreamMsg sm) {
                 }
             }
 
+            // ── Required reasoning missing: learn it, retry with it (#117) ──
+            // A thinking-mode model 400s a history whose earlier assistant
+            // turns lack reasoning_content: turns another model produced, or
+            // ones it did not reason on. Without this the session is dead
+            // until the user switches model. Record what THIS model on THIS
+            // host needs (persisted), and re-run the SAME turn; the body
+            // builder now fills those turns. Learning can only widen the
+            // scope (none → tool-call turns → every turn), so it learns at most
+            // twice per model and can't loop.
+            if (err_ctx && !has_committed
+                && m.d.selection.kind != provider::Kind::Anthropic
+                && prior_transient < provider::kMaxRetries) {
+                const auto need = provider::parse_reasoning_echo_required(
+                    e.message, e.http_status);
+                const auto& ep = m.d.selection.openai_endpoint;
+                // The model that served this turn: Smart Mode may have routed
+                // it to another role's model than the picker shows.
+                const std::string& served = m.s.smart_turn_model.empty()
+                    ? m.d.model_id.value : m.s.smart_turn_model.value;
+                const std::string host = host_key(ep.host, ep.port);
+                const auto known = reasoning_echo_for(host, served);
+                if (need != provider::ReasoningEcho::None && !ep.host.empty()
+                    && static_cast<std::uint8_t>(need) > known) {
+                    const std::string key = reasoning_echo_key(host, served);
+                    set_reasoning_echo(key, static_cast<std::uint8_t>(need));
+                    m.d.persisted.reasoning_echo[key] = static_cast<std::uint8_t>(need);
+                    Cmd learned_save = save_record(m);
+                    AGT_LOG(Model, Warn, "caps.reasoning_echo_required",
+                            "key={} scope={} http={} msg={}", key,
+                            need == provider::ReasoningEcho::All ? "all" : "tool_calls",
+                            e.http_status,
+                            std::string_view{e.message}.substr(0, 256));
+                    if (!reschedule_streaming(m.s.phase, [&](phase::Active& c) {
+                            c.transient_retries = prior_transient + 1;
+                            c.last_failure_at   = m.now;
+                            c.retry             = retry::Scheduled{};
+                        }))
+                        return Cmd::none();
+                    auto toast = set_status_toast(
+                        m, served + " wants reasoning on earlier turns \xe2\x80\x94 "
+                               "resent with it",
+                        std::chrono::seconds{6});
+                    return Cmd::batch(std::move(learned_save), std::move(toast),
+                                      Cmd::after(std::chrono::milliseconds{50},
+                                                 Msg{RetryStream{}}));
+                }
+            }
+
             // ── reasoning_effort rejection 4xx: learn, clamp, retry ─────
             // The provider rejected the effort value we sent — and usually
             // NAMES its accepted set in the body (Mistral: "supported

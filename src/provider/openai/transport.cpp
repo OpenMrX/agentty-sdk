@@ -1942,7 +1942,10 @@ Endpoint Endpoint::from_spec(std::string_view spec) {
 //     message that requested them.
 //   • Images: OpenAI uses `content:[{type:"image_url", image_url:{url:
 //     "data:<mime>;base64,<...>"}}]`.
-json build_messages(const Thread& t) {
+json build_messages(const Thread& t) { return build_messages(t, 0); }
+
+json build_messages(const Thread& t, std::uint8_t reasoning_echo) {
+    const auto echo = static_cast<provider::ReasoningEcho>(reasoning_echo);
     json arr = json::array();
     // Recency ranks for the shared age-tiered wire budget (0 = newest tool
     // result). Same policy as Anthropic — see wire::cap_tool_result_aged.
@@ -2020,6 +2023,33 @@ json build_messages(const Thread& t) {
             // recorded field (another dialect, or no reasoning) gets none.
             if (!m.reasoning_wire_field.empty() && !m.thinking.empty())
                 msg[m.reasoning_wire_field] = scrub_utf8(m.thinking);
+            // A model that requires reasoning on earlier turns 400s a turn
+            // with none (#117): one another model produced, or one it did not
+            // reason on. Send what reasoning the turn does have (another
+            // model's thinking, or text that arrived inline in <think> tags)
+            // under the field this model asks for; otherwise one space. An
+            // empty string is not enough: gateways check for a non-empty
+            // value (9router#4804, tested at 5 and 41 turns).
+            const bool echo_turn = m.role == Role::Assistant
+                && (echo == provider::ReasoningEcho::All
+                    || (echo == provider::ReasoningEcho::ToolCalls && has_tools));
+            if (echo_turn) {
+                auto it = msg.find("reasoning_content");
+                const bool present = it != msg.end() && it->is_string()
+                                     && !it->get_ref<const std::string&>().empty();
+                if (!present) {
+                    std::string r = m.reasoning_wire_field.empty()
+                                        ? scrub_utf8(m.thinking) : std::string{};
+                    // A turn that sent its reasoning as `reasoning` already
+                    // has it on the wire; repeat it rather than invent one.
+                    if (r.empty())
+                        if (auto o = msg.find("reasoning");
+                            o != msg.end() && o->is_string())
+                            r = o->get<std::string>();
+                    msg["reasoning_content"] = r.empty() ? std::string{" "}
+                                                         : std::move(r);
+                }
+            }
             arr.push_back(std::move(msg));
         }
 
@@ -2670,7 +2700,9 @@ json build_request_body(const Request& req) {
                             {"content", scrub_utf8(req.system_prompt)}});
     }
     {
-        json conv = build_messages(Thread{ThreadId{""}, "", req.messages, {}, {}});
+        const std::uint8_t echo = reasoning_echo_for(
+            host_key(req.endpoint.host, req.endpoint.port), req.model);
+        json conv = build_messages(Thread{ThreadId{""}, "", req.messages, {}, {}}, echo);
         for (auto& m : conv) messages.push_back(std::move(m));
     }
     body["messages"] = std::move(messages);

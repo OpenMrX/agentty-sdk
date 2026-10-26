@@ -332,6 +332,65 @@ TEST_CASE("test_build_messages_replays_reasoning_under_its_field") {
         if (m["role"] == "user") CHECK(!m.contains("reasoning_content"));
 }
 
+// #117, the case 298b3359 left open: a model that needs reasoning on EVERY
+// earlier assistant turn (Beam), in a history another model wrote. The
+// default stays as above; with a learned scope, every turn that has no
+// reasoning_content gets one.
+TEST_CASE("test_build_messages_fills_required_reasoning") {
+    Thread t{ThreadId{"r"}, "", {}, {}, {}};
+    Message u; u.role = Role::User; u.text = "q";
+    Message own; own.role = Role::Assistant; own.text = "A";
+    own.thinking = "mine"; own.reasoning_wire_field = "reasoning_content";
+    Message lax; lax.role = Role::Assistant; lax.text = "B";   // another model, no reasoning
+    Message foreign; foreign.role = Role::Assistant; foreign.text = "C";
+    foreign.thinking = "theirs";   // reasoned, but on a wire with no field (inline <think>, Anthropic)
+    Message sent_as; sent_as.role = Role::Assistant; sent_as.text = "D";
+    sent_as.thinking = "as-reasoning"; sent_as.reasoning_wire_field = "reasoning";
+    Message tool; tool.role = Role::Assistant; tool.text = "E";
+    ToolUse tc;
+    tc.id = ToolCallId{"call_1"}; tc.name = ToolName{"read"};
+    tc.args = nlohmann::json{{"path", "f"}};
+    tc.status = ToolUse::Done{{}, {}, "body"};
+    tool.tool_calls.push_back(tc);
+    t.messages = {u, own, u, lax, u, foreign, u, sent_as, u, tool, u};
+
+    auto assistants = [&](std::uint8_t echo) {
+        std::vector<nlohmann::json> out;
+        for (const auto& m : oai::build_messages(t, echo))
+            if (m["role"] == "assistant") out.push_back(m);
+        return out;
+    };
+
+    // All (2): every assistant turn carries a non-empty reasoning_content.
+    auto all = assistants(2);
+    REQUIRE(all.size() == 5);
+    CHECK(all[0]["reasoning_content"] == "mine");          // its own, untouched
+    CHECK(all[1]["reasoning_content"] == " ");             // nothing to send: a placeholder
+    CHECK(all[2]["reasoning_content"] == "theirs");        // another model's thinking, reused
+    CHECK(all[3]["reasoning"] == "as-reasoning");          // its own field still sent
+    CHECK(all[3]["reasoning_content"] == "as-reasoning");  // and the one this model wants
+    CHECK(all[4]["reasoning_content"] == " ");
+    for (const auto& a : all) {
+        REQUIRE(a["reasoning_content"].is_string());
+        CHECK(!a["reasoning_content"].get<std::string>().empty());
+    }
+
+    // ToolCalls (1): only the turn with a tool call is filled.
+    auto tools = assistants(1);
+    REQUIRE(tools.size() == 5);
+    CHECK(tools[0]["reasoning_content"] == "mine");
+    CHECK(!tools[1].contains("reasoning_content"));
+    CHECK(!tools[2].contains("reasoning_content"));
+    CHECK(!tools[3].contains("reasoning_content"));
+    CHECK(tools[4]["reasoning_content"] == " ");
+
+    // None (0) is exactly the plain overload: no request changes for a model
+    // that never asked.
+    CHECK(oai::build_messages(t, 0) == oai::build_messages(t));
+    for (const auto& m : oai::build_messages(t))
+        if (m["role"] == "user") CHECK(!m.contains("reasoning_content"));
+}
+
 TEST_CASE("test_sse_structured_thinking_parts") {
     // Mistral reasoning models (mistral-small 4 / -medium 3.5 with
     // reasoning_effort) stream chain-of-thought as a STRUCTURED content-parts

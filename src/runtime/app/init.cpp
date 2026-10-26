@@ -212,6 +212,9 @@ std::pair<Model, Cmd> init() {
     // Same for optional body fields a host 400'd (#93): a strict host pays
     // the reject→learn→retry round-trip once, ever, not once per launch.
     set_rejected_fields(settings.rejected_fields);
+    // And for models that need reasoning sent back on earlier turns (#117):
+    // the first turn after a restart already carries it.
+    set_reasoning_echoes(settings.reasoning_echo);
 
     // Smart Mode: the persisted config IS the runtime config — one type, no
     // mapping. Everything the old rehydration did by hand (three slots × three

@@ -1674,6 +1674,63 @@ inline void set_rejected_fields(std::map<std::string, std::uint8_t> all) {
     return rejected_fields_detail::reg().snapshot();
 }
 
+// ── Learned reasoning-echo registry (per HOST + MODEL) ────────────────────────
+// Which earlier assistant turns a model needs `reasoning_content` on, even
+// turns with no reasoning of their own to send (provider::ReasoningEcho; #117).
+// Learned from the model's own 400 and persisted (Settings.reasoning_echo).
+//
+// Keyed by host AND model, unlike rejected_fields: this is the MODEL's
+// contract, not the gateway's schema. One gateway (Vercel, Pollinations)
+// serves strict and lax models side by side, and a strict-schema host such
+// as Groq 400s the unknown field, so padding every model's history on a host
+// would trade one 400 for another.
+namespace reasoning_echo_detail {
+inline Registry<std::uint8_t>& reg() { static Registry<std::uint8_t> r; return r; }
+} // namespace reasoning_echo_detail
+
+[[nodiscard]] inline std::string reasoning_echo_key(std::string_view host_key_,
+                                                    std::string_view model_id) {
+    std::string k{host_key_};
+    k += '|';
+    k += norm_caps_key(model_id);
+    return k;
+}
+// Models known to need it before their first 400, so the first turn after a
+// model switch already goes through. Every one of them is also learnable;
+// this only saves the round trip. Beam (Reflection) checks EVERY assistant
+// turn and ships under several names: reflection/beam(-free) on Vercel AI
+// Gateway, vercel-beam on Pollinations, and its pre-launch stealth name
+// cat-jam (OpenCode Zen, 9router#4804).
+[[nodiscard]] inline std::uint8_t seeded_reasoning_echo(std::string_view model_id) {
+    const std::string tail = capkey::norm_tail(model_id);
+    const auto has = [&](std::string_view s) {
+        return tail.find(s) != std::string::npos;
+    };
+    // "reflection/beam-free" → vendor "reflection", tail "beam-free".
+    const auto slash = model_id.rfind('/');
+    const bool reflection = slash != std::string_view::npos
+        && capkey::norm_tail(model_id.substr(0, slash)) == "reflection";
+    if (has("cat-jam") || has("vercel-beam")
+        || (reflection && tail.starts_with("beam")))
+        return 2;   // provider::ReasoningEcho::All
+    return 0;
+}
+inline void set_reasoning_echo(const std::string& key, std::uint8_t scope) {
+    reasoning_echo_detail::reg().set(key, scope);
+}
+inline void set_reasoning_echoes(std::map<std::string, std::uint8_t> all) {
+    reasoning_echo_detail::reg().replace(std::move(all));
+}
+// Learned beats seeded, so a model that turns out to need more (or less)
+// than its seed says is corrected by its own 400.
+[[nodiscard]] inline std::uint8_t reasoning_echo_for(std::string_view host_key_,
+                                                     std::string_view model_id) {
+    if (auto v = reasoning_echo_detail::reg().find(
+            "", reasoning_echo_key(host_key_, model_id)))
+        return *v;
+    return seeded_reasoning_echo(model_id);
+}
+
 // ── Learned effort-set registry (feature DETECTION, not enumeration) ──────
 // When a provider rejects a reasoning_effort value it usually names the
 // contract in the error body — Mistral: "supported values: [high, none]";

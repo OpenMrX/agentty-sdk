@@ -2992,6 +2992,12 @@ store::Settings load_settings_from_disk() {
                     s.rejected_fields[k] =
                         static_cast<std::uint8_t>(v.get<unsigned>() & 0xFFu);
         }
+        if (j.contains("reasoning_echo") && j["reasoning_echo"].is_object()) {
+            // Scopes past All (2) are not ours: a hand edit or a newer build.
+            for (auto& [k, v] : j["reasoning_echo"].items())
+                if (v.is_number_unsigned() && v.get<unsigned>() <= 2u)
+                    s.reasoning_echo[k] = static_cast<std::uint8_t>(v.get<unsigned>());
+        }
         auto grants = j.value("always_allow_tools", std::vector<std::string>{});
         s.always_allow_tools = std::move(grants);
         s.context_1m_blocked = j.value("context_1m_blocked", false);
@@ -3404,6 +3410,12 @@ void save_settings_locked(persistence::Held held, const store::Settings& s) {
         for (const auto& [k, v] : s.rejected_fields)
             rf[k] = static_cast<unsigned>(v);
         j["rejected_fields"] = std::move(rf);
+    }
+    if (!s.reasoning_echo.empty()) {
+        json re = json::object();
+        for (const auto& [k, v] : s.reasoning_echo)
+            re[k] = static_cast<unsigned>(v);
+        j["reasoning_echo"] = std::move(re);
     }
     if (!s.always_allow_tools.empty())
         j["always_allow_tools"] = s.always_allow_tools;

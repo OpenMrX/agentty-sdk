@@ -112,6 +112,10 @@ provider::StreamResult run_stream_sync(Request req, EventSink sink,
 
 // Build the OpenAI-shaped `messages` array from our Thread. Exposed for tests.
 [[nodiscard]] nlohmann::json build_messages(const Thread& t);
+// The same, for a model that needs `reasoning_content` on earlier assistant
+// turns that have none of their own (provider::ReasoningEcho as its byte,
+// from reasoning_echo_for; #117): 1 = turns with tool calls, 2 = every turn.
+[[nodiscard]] nlohmann::json build_messages(const Thread& t, std::uint8_t reasoning_echo);
 
 // Translate our provider::ToolSpec list into OpenAI `tools: [{type:function,
 // function:{name, description, parameters}}]`. Exposed for tests.

@@ -222,6 +222,48 @@ TEST_CASE("vision 400: an image from a read tool result is stripped and the turn
     CHECK(!cmd.is_none());
 }
 
+// #117: the 400 that dead-ended a session after a model switch now learns
+// what the model needs and re-runs the same turn; the next body carries it.
+TEST_CASE("reasoning_content 400: learned per model, persisted, turn retried") {
+    install_stub_deps();
+    set_reasoning_echoes({});
+    auto start = model_with_gauge(60000);
+    start.d.selection.kind = provider::Kind::OpenAI;
+    start.d.selection.openai_endpoint =
+        provider::openai::Endpoint::from_spec("https://gw.example.org/v1");
+    start.d.model_id = ModelId{"some/strict-thinker"};   // not seeded
+    Message u; u.role = Role::User; u.text = "go on";
+    Message prior; prior.role = Role::Assistant; prior.text = "from the last model";
+    start.d.current.messages = {u, prior, u};
+    Message next; next.role = Role::Assistant;   // the failing continuation
+    start.d.current.messages.push_back(next);
+    start.s.phase = phase::Streaming{phase::Active{}};
+
+    const std::string host = host_key("gw.example.org", 443);
+    REQUIRE(reasoning_echo_for(host, "some/strict-thinker") == 0);
+
+    StreamError err;
+    err.message = "Missing required parameter: 'messages[1].reasoning_content'. This "
+                  "model needs the reasoning of every earlier assistant message: send "
+                  "back the 'reasoning_content' returned with that message.";
+    err.http_status = 400;
+    auto [m, cmd] = app::update(std::move(start), Msg{msg::StreamMsg{err}});
+
+    CHECK(reasoning_echo_for(host, "some/strict-thinker") == 2);       // learned: every turn
+    CHECK(m.d.persisted.reasoning_echo.size() == 1);                   // and persisted
+    CHECK(reasoning_echo_for(host, "some/other-model") == 0);          // for that model only
+    CHECK(!m.s.is_idle());      // retry scheduled, not a dead turn
+    CHECK(!cmd.is_none());
+
+    // The same 400 again (a gateway that wants something else) is not learned
+    // twice: the scope is already All, so it falls through to the normal error
+    // path instead of retrying forever.
+    auto [m2, cmd2] = app::update(std::move(m), Msg{msg::StreamMsg{err}});
+    CHECK(reasoning_echo_for(host, "some/strict-thinker") == 2);
+    CHECK(m2.d.persisted.reasoning_echo.size() == 1);
+    set_reasoning_echoes({});
+}
+
 TEST_CASE("gauge: a new thread starts at zero") {
     install_stub_deps();
     auto [m, _] = app::update(model_with_gauge(60000), Msg{NewThread{}});
