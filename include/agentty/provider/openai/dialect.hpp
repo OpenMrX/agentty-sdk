@@ -43,6 +43,20 @@ inline const Lens<std::string>& reasoning_delta() {
     return l;
 }
 
+// The name of the field reasoning_delta() read, so the turn can send its
+// reasoning back under the same name. GitHub's own client does exactly this
+// (runtime.node: model_protocol/conversation_reasoning.rs records a per-
+// message `reasoning_wire_field` of "reasoning_content" or "reasoning" and
+// the chat-completions encoder writes the text back under it). Same order and
+// `nonempty` rule as reasoning_delta(), so the two can't disagree.
+[[nodiscard]] inline std::string_view reasoning_field(const nlohmann::json& delta) {
+    for (const char* k : {"reasoning_content", "reasoning"})
+        if (auto it = delta.find(k); it != delta.end() && it->is_string()
+            && !it->get_ref<const std::string&>().empty())
+            return k;
+    return {};
+}
+
 // ── prose content ────────────────────────────────────────────────────────
 //
 // The ordinary case is a plain string. Mistral's reasoning models instead
@@ -299,12 +313,9 @@ inline const Lens<bool>& declared_tool_use() {
 // supports_preserve_reasoning is deliberately NOT read. It says the template
 // can keep earlier turns' thinking in history rather than only the last
 // one — which would matter if agentty replayed thinking on this wire, and it
-// does not. The Anthropic path replays thinking blocks because that wire
-// REQUIRES it (a tool_use turn 400s without the signed block before it);
-// build_messages() on the chat wire sends role/content/tool_calls and no
-// reasoning field at all. There is nothing to preserve, so reading the flag
-// would only create the impression that something acts on it. It becomes
-// interesting the day this wire replays thinking, not before.
+// now does: each assistant message's reasoning goes back under the field it
+// arrived in (Message::reasoning_wire_field). The flag still decides
+// nothing here.
 inline const Lens<bool>& template_reasoning_effort() {
     static const Lens<bool> l =
         under("chat_template_caps", key<bool>("supports_reasoning_effort"));

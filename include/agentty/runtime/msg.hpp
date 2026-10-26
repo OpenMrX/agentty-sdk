@@ -249,6 +249,10 @@ struct StreamThinkingDelta {
     // encryption; opaque). The reducer stores it as its own ThinkingBlock so
     // the wire replays it verbatim — required before tool_use. Not rendered.
     std::string redacted_data;
+    // Chat wire only: the field the text arrived in ("reasoning_content" or
+    // "reasoning"). Recorded on the message so the next turn sends the
+    // reasoning back under the same name, as GitHub's client does.
+    std::string wire_field;
 };
 // Codex/Responses reasoning-item capture. Unlike StreamThinkingDelta (which
 // carries visible summary text for the thinking block), this carries the

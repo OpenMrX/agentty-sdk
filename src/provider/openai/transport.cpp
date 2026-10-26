@@ -99,12 +99,10 @@ struct StreamCtx {
     // salvage/drop event names which model produced it.
     std::string model_id;
 
-    // Mirrors req.show_reasoning. When the user has reasoning HIDDEN we
-    // convert reasoning text deltas into heartbeats: the wire streams
-    // reasoning_content unconditionally on this dialect, and capturing it
-    // invisibly just bloats Message::thinking + the persisted session for
-    // bytes never displayed and never replayed on this wire. Defaults true
-    // so the test harnesses keep capture semantics.
+    // Mirrors req.show_reasoning. Only the Mistral thinking-PARTS path
+    // reads it now; plain reasoning_content/reasoning is always captured,
+    // because the next turn sends it back (see build_messages). Defaults
+    // true so the test harnesses keep capture semantics.
     bool show_reasoning = true;
 
     // Byte-level stream framing lives in the shared wire helpers (see
@@ -916,11 +914,13 @@ void handle_delta(StreamCtx& ctx, const json& delta) {
     // emits for thinking_delta — so the reducer / UI render it identically.
     // Also a liveness signal during a long reasoning pause before any visible
     // content.
+    // Captured whether or not the UI shows it: the next turn sends it back
+    // (GitHub's client keeps it for the same reason). Hidden reasoning is
+    // still not rendered; the view decides that, not the wire.
     if (auto r = dialect::reasoning_delta()(delta)) {
-        if (ctx.show_reasoning)
-            ctx.sink(StreamThinkingDelta{*r, {}});
-        else
-            ctx.sink(StreamHeartbeat{});  // liveness only, no capture
+        StreamThinkingDelta td{*r, {}};
+        td.wire_field = std::string{dialect::reasoning_field(delta)};
+        ctx.sink(std::move(td));
     }
 
     // Structured content-parts array (Mistral reasoning models): `content`
@@ -2014,6 +2014,12 @@ json build_messages(const Thread& t) {
                 }
                 msg["tool_calls"] = std::move(calls);
             }
+            // Send the turn's reasoning back under the field it arrived in,
+            // as GitHub's client does (runtime.node, chat-completions
+            // encoder: per-message reasoning_wire_field). A message with no
+            // recorded field (another dialect, or no reasoning) gets none.
+            if (!m.reasoning_wire_field.empty() && !m.thinking.empty())
+                msg[m.reasoning_wire_field] = scrub_utf8(m.thinking);
             arr.push_back(std::move(msg));
         }
 

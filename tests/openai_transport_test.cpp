@@ -289,6 +289,49 @@ TEST_CASE("test_sse_reasoning_alt_field") {
     CHECK(joined_text(msgs) == "ok");
 }
 
+// #117. Each delta says which field its reasoning came in, and the next
+// request sends the turn's reasoning back under that same field, the way
+// GitHub's client does (per-message reasoning_wire_field).
+TEST_CASE("test_sse_reasoning_records_its_field") {
+    auto field_of = [](const std::string& sse) {
+        std::string f;
+        for (const auto& m : oai::parse_sse_for_test(sse))
+            if (const auto* t = get_leaf<StreamThinkingDelta>(m)) f = t->wire_field;
+        return f;
+    };
+    CHECK(field_of("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"a\"}}]}\n\n"
+                   "data: [DONE]\n\n") == "reasoning_content");
+    CHECK(field_of("data: {\"choices\":[{\"delta\":{\"reasoning\":\"a\"}}]}\n\n"
+                   "data: [DONE]\n\n") == "reasoning");
+    // An empty reasoning_content beside a populated reasoning: the one with text.
+    CHECK(field_of("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"\",\"reasoning\":\"a\"}}]}\n\n"
+                   "data: [DONE]\n\n") == "reasoning");
+}
+
+TEST_CASE("test_build_messages_replays_reasoning_under_its_field") {
+    Thread t{ThreadId{"r"}, "", {}, {}, {}};
+    Message u; u.role = Role::User; u.text = "q";
+    Message a; a.role = Role::Assistant; a.text = "A";
+    a.thinking = "thought"; a.reasoning_wire_field = "reasoning_content";
+    Message b; b.role = Role::Assistant; b.text = "B";
+    b.thinking = "other";   b.reasoning_wire_field = "reasoning";
+    Message c; c.role = Role::Assistant; c.text = "C";   // another model: none
+    t.messages = {u, a, u, b, u, c, u};
+
+    auto arr = oai::build_messages(t);
+    std::vector<nlohmann::json> asst;
+    for (const auto& m : arr) if (m["role"] == "assistant") asst.push_back(m);
+    REQUIRE(asst.size() == 3);
+    CHECK(asst[0]["reasoning_content"] == "thought");
+    CHECK(!asst[0].contains("reasoning"));
+    CHECK(asst[1]["reasoning"] == "other");
+    CHECK(!asst[1].contains("reasoning_content"));
+    CHECK(!asst[2].contains("reasoning_content"));
+    CHECK(!asst[2].contains("reasoning"));
+    for (const auto& m : arr)
+        if (m["role"] == "user") CHECK(!m.contains("reasoning_content"));
+}
+
 TEST_CASE("test_sse_structured_thinking_parts") {
     // Mistral reasoning models (mistral-small 4 / -medium 3.5 with
     // reasoning_effort) stream chain-of-thought as a STRUCTURED content-parts

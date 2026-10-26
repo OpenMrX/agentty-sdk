@@ -1717,6 +1717,7 @@ Cmd stream_update(Model& m, msg::StreamMsg sm) {
                 if (!e.text.empty()) {
                     open_block().text += e.text;
                     msg.thinking      += e.text;
+                    if (!e.wire_field.empty()) msg.reasoning_wire_field = e.wire_field;
                     // Open a thinking phase on the first thinking text of
                     // this phase (steady clock; sealed by the answer or a
                     // tool call). Re-opens after a seal, which is what makes

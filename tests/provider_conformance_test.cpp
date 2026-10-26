@@ -479,19 +479,24 @@ Seen ollama(bool show) {
 }  // namespace reasoning
 
 TEST_CASE("conformance: hiding reasoning hides it on every dialect") {
-    struct Case { const char* id; reasoning::Seen (*run)(bool); };
-    for (const Case c : {Case{"openai-chat",      &reasoning::chat},
-                         Case{"openai-responses", &reasoning::responses},
-                         Case{"ollama-native",    &reasoning::ollama}}) {
+    struct Case { const char* id; reasoning::Seen (*run)(bool); bool keeps_text; };
+    // openai-chat KEEPS the text when hidden: the next request sends each
+    // turn's reasoning back under its field (GitHub's client does the same,
+    // and some hosts 400 without it, #117). Not showing it is the view's
+    // job (ui::reasoning_shown), not the decoder's.
+    for (const Case c : {Case{"openai-chat",      &reasoning::chat,      true},
+                         Case{"openai-responses", &reasoning::responses, false},
+                         Case{"ollama-native",    &reasoning::ollama,    false}}) {
         INFO("dialect = " << std::string{c.id});
 
         // Shown: the text reaches the reducer.
         const auto on = c.run(true);
         CHECK(on.text.find("pondering") != std::string::npos);
 
-        // Hidden: no reasoning TEXT survives…
+        // Hidden: no reasoning TEXT survives… except where the wire needs it.
         const auto off = c.run(false);
-        CHECK(off.text.empty());
+        if (c.keeps_text) CHECK(off.text == on.text);
+        else              CHECK(off.text.empty());
 
         // …but SOME liveness signal still fires. Swallowing the event
         // entirely makes a long silent reasoning phase look like a dead

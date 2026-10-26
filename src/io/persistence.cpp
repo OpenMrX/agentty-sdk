@@ -557,6 +557,8 @@ json message_to_json(const Message& m) {
     // ciphertext, or the first turn after a restart replays it blind.
     if (!m.reasoning_site.empty())
         j["reasoning_site"] = m.reasoning_site;
+    if (!m.reasoning_wire_field.empty())
+        j["reasoning_wire_field"] = m.reasoning_wire_field;
     // Non-image attachments (Paste / FileRef / Symbol). Persisted so a
     // reloaded thread can rebuild its wire payload — the user's `text`
     // carries chip placeholders, and the model only sees real content
@@ -794,6 +796,7 @@ std::expected<Message, DeserializeError> message_from_json(const json& j) {
     // without a match — so an old thread quietly loses reasoning
     // continuity rather than risking a 400 on a blob we cannot place.
     m.reasoning_site = j.value("reasoning_site", "");
+    m.reasoning_wire_field = j.value("reasoning_wire_field", "");
     if (auto it = j.find("error"); it != j.end() && it->is_string()
         && !it->get<std::string>().empty())
         m.error = it->get<std::string>();
@@ -2041,6 +2044,7 @@ static std::uint64_t message_fingerprint(const Message& m) {
     f.num(m.reasoning_ms);
     f.str(m.reasoning_encrypted);
     f.str(m.reasoning_site);
+    f.str(m.reasoning_wire_field);
     f.str(m.reasoning_summary);
     f.num(m.thinking_blocks.size());
     for (const auto& b : m.thinking_blocks) {

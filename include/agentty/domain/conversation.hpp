@@ -635,6 +635,12 @@ struct Message {
     // switch, which the user just asked for anyway; sending costs the turn.
     std::string reasoning_site;
     std::string reasoning_summary;
+    // Chat wire: the field this message's reasoning arrived in
+    // ("reasoning_content" or "reasoning"); empty when it had none. The next
+    // request sends `thinking` back under this name, and only this name.
+    // Mirrors GitHub's client (runtime.node: per-message
+    // `reasoning_wire_field`, model_protocol/conversation_reasoning.rs).
+    std::string reasoning_wire_field;
 
     // Unified reasoning text for DISPLAY, across every provider. All three
     // reasoning wires funnel their VISIBLE text into `thinking` via
