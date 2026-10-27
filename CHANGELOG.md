@@ -4,6 +4,8 @@ All notable changes to agentty. Versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.36] - 2026-10-27
+
 ### Added
 - **Routing gateways keep a conversation on the backend that served it**
   (#118). Every request on an OpenAI-compatible provider now carries
