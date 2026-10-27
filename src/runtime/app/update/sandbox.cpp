@@ -114,6 +114,14 @@ namespace sb = agentty::tools::util::sandbox;
     pn::HostFacts f;
     f.claybin_available = claybin_here();
     f.landlock_abi = landlock_abi_here();
+#if defined(__APPLE__)
+    f.per_port_net = f.claybin_available
+                     && sb::claybin_backend::host().sbpl_network_filters;
+    f.ipc_scoped = f.claybin_available;
+#elif defined(__linux__)
+    f.per_port_net = f.landlock_abi >= 4;
+    f.ipc_scoped = f.landlock_abi >= 6;
+#endif
     f.sandbox_active = sb::is_active();
     f.mode_off = sb::requested_mode() == sb::Mode::Off;
     f.running = sandbox_cfg::LinuxBackend::Claybin;
@@ -744,7 +752,7 @@ Cmd sandbox_update(Model& m, msg::SandboxMsg sm) {
                 const auto before = o->pane.working.allow_ports;
                 const bool changed = cfg.allow_ports != before;
                 const bool ports_ok = o->pane.facts.claybin_available
-                                      && o->pane.facts.landlock_abi >= 4;
+                                      && o->pane.facts.per_port_net;
                 if (changed && !cfg.allow_ports.empty() && ports_ok
                     && cfg.net_mode == sandbox_cfg::NetMode::Full)
                     cfg.net_mode = sandbox_cfg::NetMode::Ports;

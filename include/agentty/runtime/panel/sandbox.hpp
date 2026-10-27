@@ -178,6 +178,13 @@ struct HostFacts {
     // write), not a guess.
     bool claybin_available = false;
     std::uint32_t landlock_abi = 0;
+    // Can the engine filter network by port? Linux: landlock abi 4+.
+    // macOS: seatbelt endpoint filters.
+    bool per_port_net = false;
+    // Are abstract sockets and signals kept inside the sandbox? Linux:
+    // landlock abi 6+. macOS: seatbelt scopes signals and has no abstract
+    // sockets.
+    bool ipc_scoped = false;
 
     // What is enforcing RIGHT NOW. Sealed at startup and immutable for the
     // life of the process -- which is the whole reason it has to be separate

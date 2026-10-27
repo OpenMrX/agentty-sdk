@@ -87,6 +87,8 @@ pn::HostFacts facts_for(const sandbox_cfg::Config& cfg,
     pn::HostFacts f;
     f.claybin_available = claybin_available;
     f.landlock_abi = landlock_abi;
+    f.per_port_net = landlock_abi >= 4;
+    f.ipc_scoped = landlock_abi >= 6;
     f.sandbox_active = true;
     f.running = cfg.backend;
     return f;

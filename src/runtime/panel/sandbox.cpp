@@ -361,15 +361,16 @@ form::Form build_sandbox_form(const sandbox_cfg::Config& cfg,
          "an empty network namespace \xc2\xb7 nothing can connect out",
          "only outgoing TCP to the ports below \xc2\xb7 DNS and other UDP are "
          "not filtered \xc2\xb7 no listening sockets \xc2\xb7 needs landlock abi 4+"}));
-    // Per-port needs landlock abi 4. Below that the kernel cannot express it,
-    // so say so on the row rather than accepting a setting that silently
-    // degrades to Full.
+    // Per-port needs landlock abi 4 on Linux, seatbelt endpoint filters on
+    // macOS. Without it, say so rather than accept a setting that does nothing.
     if (!claybin_live)
         lock_row(form, kSbNetMode, why_locked);
-    else if (landlock_abi < 4)
+    else if (!facts.per_port_net)
         lock_row(form, kSbNetMode,
-                 "per-port needs landlock abi 4, host has " +
-                     std::to_string(landlock_abi));
+                 landlock_abi > 0
+                     ? "per-port needs landlock abi 4, host has " +
+                           std::to_string(landlock_abi)
+                     : std::string{"this host cannot filter network by port"});
 
     form.fields.push_back(
         list_row(kSbPorts, std::string{i18n::t("sandbox.ports")},
@@ -478,17 +479,18 @@ form::Form build_sandbox_form(const sandbox_cfg::Config& cfg,
         "on: the command cannot talk to host processes over an abstract "
         "socket or signal them",
         "off: it can reach any listening host process, sandbox or not"));
-    // claybin always scopes IPC when landlock has abi 6, and never can below
-    // it, so this row reports rather than chooses.
+    // The engine decides this, not the user: always on with landlock abi 6+
+    // or under seatbelt, never possible below abi 6. The row reports it.
     if (!claybin_live)
         lock_row(form, kSbScopeIpc, why_locked);
     else {
         lock_row(form, kSbScopeIpc,
-                 landlock_abi < 6
-                     ? "needs landlock abi 6, host has " + std::to_string(landlock_abi)
-                     : std::string{"always on with landlock abi 6+"});
+                 facts.ipc_scoped
+                     ? std::string{landlock_abi > 0 ? "always on with landlock abi 6+"
+                                                    : "always on under seatbelt"}
+                     : "needs landlock abi 6, host has " + std::to_string(landlock_abi));
         if (auto* t = std::get_if<form::field::Toggle>(&form.fields.back().value))
-            t->on = landlock_abi >= 6;
+            t->on = facts.ipc_scoped;
     }
 
     form.fields.push_back(toggle(
