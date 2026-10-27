@@ -153,6 +153,9 @@ struct CallContext {
     // subagent's run id inside one, so a subagent never reads its parent's
     // "you already read this file".
     std::string reader;
+    // The thread the call serves. A subagent sends it as its gateway session
+    // id, so its requests stick with the parent's (#118). Empty: none.
+    std::string conversation;
     // The call is cancelled when any of these stops (Esc, a newer turn,
     // shutdown, the enclosing subagent run).
     std::vector<std::stop_token> cancel;

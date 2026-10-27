@@ -4,6 +4,15 @@ All notable changes to agentty. Versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Routing gateways keep a conversation on the backend that served it**
+  (#118). Every request on an OpenAI-compatible provider now carries
+  `x-session-id` with the thread id, which bifrost, OpenRouter and similar
+  gateways use for sticky routing. With a fallback chain, a thread that fell
+  through to a later model goes straight there on the next turn instead of
+  waiting through the chain again. Titles, compaction, subagents, `agentty
+  run` and ACP sessions all send the same id as the thread they belong to.
+
 ## [0.9.35] - 2026-10-26
 
 ### Fixed

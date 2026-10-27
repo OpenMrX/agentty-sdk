@@ -2149,6 +2149,11 @@ http::Headers build_request_headers(const AuthHeader& auth,
     return h;
 }
 
+void append_session_header(http::Headers& h, std::string_view key) {
+    if (!key.empty())
+        h.push_back({"x-session-id", std::string{key}});
+}
+
 // The human sentence in a provider's error body, or a capped raw excerpt.
 //
 // Shapes seen in the wild across the OpenAI-compat family:
@@ -2261,6 +2266,7 @@ provider::StreamResult run_stream_sync(Request req, EventSink sink, http::Cancel
             rreq.effort         = req.effort;
             rreq.show_reasoning = req.show_reasoning;
             rreq.session_key    = req.session_key;
+            rreq.affinity_key   = req.affinity_key;
             return stream_responses(rep, std::move(rreq), std::move(sink));
         }
         // Row advertises no /responses (a custom host, or the user overrode
@@ -2324,6 +2330,8 @@ provider::StreamResult run_stream_sync(Request req, EventSink sink, http::Cancel
         hreq.dial_port = ov.port;
     }
     hreq.headers = build_request_headers(req.auth, req.endpoint);
+    append_session_header(hreq.headers,
+                          req.affinity_key.empty() ? req.session_key : req.affinity_key);
     http::append_sse_no_buffer(hreq.headers);
     hreq.body    = std::move(body_str);
 

@@ -34,6 +34,7 @@
 #include "agentty/auth/auth.hpp"
 #include "agentty/io/http.hpp"
 #include "agentty/provider/dialect.hpp"
+#include "agentty/provider/openai/transport.hpp"
 #include "agentty/provider/registry.hpp"
 #include "agentty/provider/responses/responses.hpp"
 #include "agentty/util/logx.hpp"
@@ -81,6 +82,7 @@ openai_target(const PendingTarget& p, const provider::Request& req) {
     };
     if (!key.empty())
         t.headers.push_back({"authorization", "Bearer " + key});
+    openai::append_session_header(t.headers, req.affinity());
     // Copilot-style editor identification, or a gateway's required extras.
     for (const auto& [k, v] : p.extra_headers)
         t.headers.push_back({k, v});

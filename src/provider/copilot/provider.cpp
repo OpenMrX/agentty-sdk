@@ -363,6 +363,7 @@ provider::StreamResult CopilotProvider::stream(const maya::unlocked& cap,
         provider::lower_shared(oreq, req);
         oreq.context_window = req.context_window;
         oreq.session_key    = req.session_key;
+        oreq.affinity_key   = req.affinity();
         if (as && as->valid()) {
             // Same resolver the Responses fork used — one implementation. A
             // concrete pin is already proven available above (that path

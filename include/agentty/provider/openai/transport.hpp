@@ -76,6 +76,8 @@ struct Request {
     // node (higher cache-hit rate on the shared system+tools+history prefix).
     // Empty / local (Ollama) endpoints omit it.
     std::string session_key;
+    // Sent as `x-session-id` for gateway stickiness; see provider::Request.
+    std::string affinity_key;
     // Reasoning effort wire value ("low"|"medium"|"high"|"xhigh"|"max"), or
     // empty for no reasoning. Copied by provider::lower_shared. The OpenAI-Chat
     // transport encodes it as top-level `reasoning_effort` when non-empty;
@@ -306,6 +308,11 @@ struct HostProbe {
 // tests.
 [[nodiscard]] http::Headers build_request_headers(const AuthHeader& auth,
                                                   const Endpoint& endpoint);
+
+// Adds `x-session-id: <key>` when there is one, so a routing gateway like
+// bifrost or OpenRouter keeps a conversation on the backend that served it
+// last (#118). Sent on the chat and Responses streams.
+void append_session_header(http::Headers& h, std::string_view key);
 
 // Extra system-prompt guidance appended ONLY for OpenAI-compatible backends.
 // Weak local models (Ollama qwen2.5-coder, llama.cpp templates) over-call

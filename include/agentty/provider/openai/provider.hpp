@@ -25,6 +25,7 @@ public:
         provider::lower_shared(oreq, req);          // shared core
         oreq.context_window = req.context_window;   // OpenAI-family: Ollama num_ctx
         oreq.session_key    = req.session_key;       // prompt_cache_key routing
+        oreq.affinity_key   = req.affinity();        // x-session-id
         oreq.endpoint       = endpoint_;
         return openai::run_stream_sync(std::move(oreq), std::move(sink), std::move(req.cancel));
     }

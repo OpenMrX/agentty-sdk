@@ -118,6 +118,7 @@ provider::StreamResult KimiProvider::stream(const maya::unlocked& cap,
         provider::lower_shared(oreq, req);
         oreq.context_window = req.context_window;
         oreq.session_key    = req.session_key;
+        oreq.affinity_key   = req.affinity();
         oreq.endpoint       = make_endpoint();
         oreq.auth           = auth::BearerHeader{t.access_token};
         return provider::openai::run_stream_sync(std::move(oreq), sink, req.cancel);

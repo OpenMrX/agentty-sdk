@@ -1641,7 +1641,8 @@ Cmd stream_update(Model& m, msg::StreamMsg sm) {
                         return cmd::run_tool(tc2.id, tc2.name, tc2.args,
                                               std::move(cancel), seq,
                                               /*approved_def_hash=*/0,
-                                              std::move(active_skills));
+                                              std::move(active_skills),
+                                              m.d.current.id.value);
                     }
                 }
             }

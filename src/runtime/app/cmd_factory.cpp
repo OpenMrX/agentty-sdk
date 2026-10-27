@@ -1510,7 +1510,8 @@ std::uint64_t next_tool_exec_seq() noexcept {
 Cmd run_tool(ToolCallId id, ToolName tool_name, nlohmann::json args,
                   http::CancelTokenPtr cancel, std::uint64_t exec_seq,
                   std::uint64_t approved_def_hash,
-                  std::vector<std::string> active_skills) {
+                  std::vector<std::string> active_skills,
+                  std::string conversation) {
     // task_isolated, NOT task: a tool that wedges (e.g. read on a hung NFS
     // mount, bash on a process that won't unblock) must not consume a slot
     // in the shared BG worker pool. With Cmd::task the pool's max workers
@@ -1525,12 +1526,14 @@ Cmd run_tool(ToolCallId id, ToolName tool_name, nlohmann::json args,
            ToolCallId id, ToolName name, nlohmann::json args,
            http::CancelTokenPtr cancel, std::uint64_t exec_seq,
            std::uint64_t approved_def_hash,
-           std::vector<std::string> active_skills) {
+           std::vector<std::string> active_skills,
+           std::string conversation) {
             // Everything this call carries besides its arguments, handed to
             // the tool explicitly. The skills the model can already see were
             // derived by the reducer from the visible transcript.
             agentty::tools::CallContext ctx;
             ctx.active_skills = std::move(active_skills);
+            ctx.conversation  = std::move(conversation);
             // Every result this worker sends carries its exec_seq, so the
             // reducer can drop it if the call it was started for is gone.
             auto out = [exec_seq](ToolExecOutput o) {
@@ -1679,7 +1682,7 @@ Cmd run_tool(ToolCallId id, ToolName tool_name, nlohmann::json args,
         },
         std::move(id), std::move(tool_name), std::move(args),
         std::move(cancel), exec_seq, approved_def_hash,
-        std::move(active_skills));
+        std::move(active_skills), std::move(conversation));
 }
 
 namespace {
@@ -2215,7 +2218,8 @@ Cmd kick_pending_tools(Model& m) {
                 cmds.push_back(run_tool(tc.id, tc.name, tc.args,
                                         std::move(cancel), seq,
                                         tc.approved_def_hash,
-                                        std::move(active_skills)));
+                                        std::move(active_skills),
+                                        m.d.current.id.value));
 
                 // Tool wall-clock watchdog removed at user request.
                 // Tools now run for as long as their worker takes;
@@ -2675,6 +2679,9 @@ Cmd generate_thread_title(const Model& m) {
         [](Io io, const maya::unlocked& cap, maya::Sink<Msg> out, std::stop_token, TitleInputs in) {
             provider::Request req;
             req.model         = in.model;
+            // The thread's own session, so a gateway sends the title to the
+            // backend the chat already landed on (#118).
+            req.session_key   = in.id.value;
             // A few words, but a thinking model that ignores `quick` still
             // needs room to think before it answers.
             req.max_tokens    = 1024;

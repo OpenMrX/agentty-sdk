@@ -1341,6 +1341,9 @@ provider::StreamResult run_one_completion(Thread& thread,
         key += buf;
         req.session_key = std::move(key);
     }
+    // Gateway stickiness follows the PARENT thread, so a fresh subagent goes
+    // straight to the backend the conversation already settled on (#118).
+    req.affinity_key = ctx.conversation;
 
     auto allowed = [&](const tools::ToolDef& t) -> bool {
         return subagent_tool_allowed(t, type, stats);
@@ -2355,6 +2358,12 @@ OneShotResult run_one_shot(const maya::unlocked& cap, const OneShotOptions& opts
                 IoAccess::grant(), persistence::threads_dir(), transcripts);
     }
 
+    // One id for the run: the gateway session id (#118) and the id the
+    // thread is saved under. A resumed run keeps its thread's.
+    const bool fresh = prior.id.value.empty();
+    if (fresh) prior.id = persistence::new_id();
+    ctx.conversation = prior.id.value;
+
     mt::SubagentRequest sreq;
     sreq.prompt     = opts.prompt;
     sreq.agent_type = out.agent;
@@ -2366,8 +2375,7 @@ OneShotResult run_one_shot(const maya::unlocked& cap, const OneShotOptions& opts
     if ((opts.save || !opts.resume.empty())
         && st.final_thread.messages.size() > st.history.size()) {
         Thread t = std::move(prior);
-        if (t.id.value.empty()) {
-            t.id         = persistence::new_id();
+        if (fresh) {
             t.title      = persistence::title_from_first_message(opts.prompt);
             t.created_at = std::chrono::system_clock::now();
         }

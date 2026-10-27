@@ -2586,6 +2586,8 @@ void AgentServer::run_compact(Io, const Cap& cap, std::string sid, std::string r
     provider::Request req;
     req.model      = snap->model.empty() ? model_id_ : snap->model;
     req.max_tokens = max_output_tokens_for(req.model);
+    // Same conversation identity as the turns (#118).
+    req.session_key = snap->thread.id.value;
     req.cancel     = snap->cancel;
     req.auth       = auth();
     req.messages   = app::cmd::compaction_request_messages(
@@ -2836,19 +2838,22 @@ StopReason AgentServer::stream_completion(Io io, const Cap& cap, const std::stri
     // Snapshot what the request needs ONCE. A model change mid-turn applies
     // to the NEXT turn; the stream itself runs with no lock held.
     struct Snap {
-        std::string model, cwd, provider, effort;
+        std::string model, cwd, provider, effort, thread_id;
         bool show_reasoning;
         http::CancelTokenPtr cancel;
         std::vector<Message> messages;
     };
     auto snap = with_session(cap, session_id, [](Session& s) {
         // The wire view: after /compact the summary replaces the prefix.
-        return Snap{s.model, s.cwd, s.provider, s.effort, s.show_reasoning, s.cancel,
-                    app::cmd::wire_messages_for(s.thread)};
+        return Snap{s.model, s.cwd, s.provider, s.effort, s.thread.id.value,
+                    s.show_reasoning, s.cancel, app::cmd::wire_messages_for(s.thread)};
     });
     if (!snap) { out_error = "session vanished"; return StopReason::Unspecified; }
     const std::string sess_model = snap->model;
     req.model         = sess_model.empty() ? model_id_ : sess_model;
+    // The persisted thread id, stable across reloads: prompt-cache routing
+    // and the gateway session id (#118), as in the TUI.
+    req.session_key   = snap->thread_id;
     {
         // Reasoning effort: the session's choice, clamped to the model.
         // Unset means auto, the same per-model default the TUI uses.
@@ -3200,7 +3205,8 @@ bool AgentServer::run_tools(const Cap& cap, const std::string& session_id, bool&
         if (s.thread.messages.empty()) return std::nullopt;
         const Message& last = s.thread.messages.back();
         if (last.role != Role::Assistant || last.tool_calls.empty()) return std::nullopt;
-        return Batch{TurnCtx{s.id, s.cwd, last.id.value, s.cancel, s.extra_roots},
+        return Batch{TurnCtx{s.id, s.cwd, last.id.value, s.cancel, s.extra_roots,
+                             s.thread.id.value},
                      s.profile, last.tool_calls, s.grants};
     });
     if (!batch || !*batch) return false;
@@ -3312,6 +3318,7 @@ bool AgentServer::run_tools(const Cap& cap, const std::string& session_id, bool&
         }
         tools::CallContext call_ctx;
         call_ctx.active_skills = std::move(active_skills);
+        call_ctx.conversation  = ctx.thread_id;
         // The session's cancel reaches the running tool itself (a shell is
         // stopped), not only this wait.
         if (ctx.cancel) call_ctx.cancel.push_back(ctx.cancel->token());

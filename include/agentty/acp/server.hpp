@@ -239,6 +239,7 @@ private:
         std::string id, cwd, msg_id;
         std::shared_ptr<http::CancelToken> cancel;
         std::vector<std::string> extra_roots;
+        std::string thread_id;   // for CallContext::conversation
         [[nodiscard]] bool cancelled() const { return cancel && cancel->is_cancelled(); }
     };
     std::optional<TerminalRun> run_bash_via_terminal(const Cap& cap, const TurnCtx& ctx, ToolUse& tc);

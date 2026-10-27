@@ -113,6 +113,15 @@ struct Request {
     // Empty means the caller has no durable conversation identity.
     std::string session_key;
 
+    // The conversation this request belongs to, sent as `x-session-id` so a
+    // routing gateway (bifrost, OpenRouter) keeps it on the backend that
+    // served it last. Defaults to session_key; a subagent sets its parent's
+    // thread id here so the whole run sticks together (#118).
+    std::string affinity_key;
+    [[nodiscard]] const std::string& affinity() const noexcept {
+        return affinity_key.empty() ? session_key : affinity_key;
+    }
+
     // The provider this request was BUILT for: its model id, auth and system
     // prompt all came from this selection. dispatch_stream routes by it, so a
     // provider switch while the turn is running can't send this provider's
