@@ -13,6 +13,14 @@ All notable changes to agentty. Versions follow [SemVer](https://semver.org/).
   waiting through the chain again. Titles, compaction, subagents, `agentty
   run` and ACP sessions all send the same id as the thread they belong to.
 
+### Fixed
+- **Models that need reasoning on every earlier turn work after a model
+  switch** (#117). Beam (and similar strict thinking models) rejected a
+  conversation another model had started, because those turns had no
+  `reasoning_content`. agentty now learns this from the 400, remembers it
+  for that host and model, and retries the turn with the field filled in.
+  Beam's known names are covered from the first request.
+
 ## [0.9.35] - 2026-10-26
 
 ### Fixed
