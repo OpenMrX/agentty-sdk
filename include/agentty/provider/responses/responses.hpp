@@ -70,6 +70,9 @@ namespace agentty::provider::responses {
 struct Target {
     std::string host;                 // "chatgpt.com"
     std::uint16_t port = 443;
+    // A self-run server over plain http (vLLM, llama.cpp): no TLS, and the
+    // local timeout ladder, which has no total cap (#108).
+    bool plaintext = false;
     std::string path;                 // "/backend-api/codex/responses"
     http::Headers headers;            // auth + identification, fully formed
     // The model slug to put on the wire. Hosts may REWRITE the caller's

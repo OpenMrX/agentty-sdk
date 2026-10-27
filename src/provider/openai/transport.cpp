@@ -2154,6 +2154,21 @@ void append_session_header(http::Headers& h, std::string_view key) {
         h.push_back({"x-session-id", std::string{key}});
 }
 
+std::string local_transport_hint(const Endpoint& ep, int http_status,
+                                 http::HttpErrorKind kind) {
+    const std::string where = ep.host + ":" + std::to_string(ep.port);
+    // Never answered: it really may not be running.
+    if (http_status == 0)
+        return "  (is the local server running on " + where +
+               "? start it, or fix the host with Ctrl-P \xe2\x86\x92 Custom host)";
+    // It answered, so it was running. Don't send people looking at a
+    // healthy server (#108).
+    if (kind == http::HttpErrorKind::Timeout)
+        return "  (" + where + " answered, then sent nothing for too long; "
+               "it may be stuck or out of memory. check its log)";
+    return {};
+}
+
 // The human sentence in a provider's error body, or a capped raw excerpt.
 //
 // Shapes seen in the wild across the OpenAI-compat family:
@@ -2361,10 +2376,10 @@ provider::StreamResult run_stream_sync(Request req, EventSink sink, http::Cancel
     // on consumer hardware can grind for minutes before the first token, and
     // a 90 s idle cut mid-processing forced a retry that re-processes the
     // same prompt from scratch, forever (the local dead loop). 10 min for
-    // plaintext endpoints; Esc still cancels instantly.
-    http::Timeouts tos = provider::stream_timeouts(
-        req.endpoint.use_tls ? std::chrono::milliseconds(90'000)
-                             : std::chrono::milliseconds(600'000));
+    // plaintext endpoints, and no total cap (#108); Esc still cancels.
+    http::Timeouts tos = req.endpoint.use_tls
+        ? provider::stream_timeouts()
+        : provider::local_stream_timeouts();
 
     // Keep a copy of the cancel token: moved into the stream call, but
     // finish_stream needs it to distinguish a user cancel from a transport
@@ -2422,15 +2437,9 @@ provider::StreamResult run_stream_sync(Request req, EventSink sink, http::Cancel
         .retry_after = sc.retry_after(),
         .transport_error_message = [&]() -> std::string {
             std::string msg = std::string{"http: "} + result.error().render();
-            // Local backend unreachable — the daemon almost certainly isn't
-            // running. Name the concrete fix, without assuming WHICH server
-            // (ollama serve / llama-server / vllm serve all apply).
             if (!req.endpoint.use_tls)
-                msg += "  (is the local server running on "
-                     + req.endpoint.host + ":"
-                     + std::to_string(req.endpoint.port)
-                     + "? start it, or fix the host with Ctrl-P \xe2\x86\x92 "
-                       "Custom host)";
+                msg += local_transport_hint(req.endpoint, sc.http_status,
+                                            result.error().kind);
             return msg;
         },
         .before_finish = [&ctx]() {

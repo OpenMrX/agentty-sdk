@@ -403,6 +403,17 @@ TEST_CASE("conformance: shared streaming timeout ladder") {
           == std::chrono::milliseconds(600'000));
 }
 
+TEST_CASE("conformance: local servers have no total cap (#108)") {
+    // A big model on a home GPU can stream one reply for over 30 min. The
+    // hosted cap killed those mid-answer while the server was fine.
+    const auto local = provider::local_stream_timeouts();
+    CHECK(local.total == std::chrono::milliseconds(0));
+    CHECK(local.idle  == std::chrono::milliseconds(600'000));   // dead server still caught
+    CHECK(local.connect == provider::stream_timeouts().connect);
+    CHECK(provider::local_stream_timeouts(std::chrono::milliseconds(120'000)).idle
+          == std::chrono::milliseconds(120'000));
+}
+
 // ── The reasoning toggle, asserted against EVERY dialect ────────────────
 //
 // This suite existed and still missed a bug: reasoning arrived on Copilot's

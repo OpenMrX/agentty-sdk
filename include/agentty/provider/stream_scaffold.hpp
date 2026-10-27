@@ -76,6 +76,17 @@ inline constexpr std::size_t kErrorBodyCap = 64 * 1024;
     return tos;
 }
 
+// The ladder for a LOCAL server (plain http: llama.cpp, Ollama, vLLM): idle
+// is longer, and there is no total cap, because a big model on a home GPU can
+// stream one reply for longer than 30 min (#108). idle still catches a dead
+// server, and Esc still cancels.
+[[nodiscard]] inline http::Timeouts local_stream_timeouts(
+        std::chrono::milliseconds idle = std::chrono::milliseconds(600'000)) {
+    http::Timeouts tos = stream_timeouts(idle);
+    tos.total = std::chrono::milliseconds(0);
+    return tos;
+}
+
 // Per-turn scaffold state + the uniform StreamHandler. Stack-allocate one per
 // run_stream_sync, wire `handler()` into the HTTP client, and read the
 // captured fields in the post-loop / finish_stream call.

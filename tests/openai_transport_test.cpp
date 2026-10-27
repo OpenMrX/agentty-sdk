@@ -1664,6 +1664,26 @@ static void find_header(const agentty::http::Headers& hs, std::string_view name,
         if (h.name == name) { *out = &h; return; }
 }
 
+TEST_CASE("local error hint: only ask 'is it running' when it never answered (#108)") {
+    oai::Endpoint ep;
+    ep.host = "localhost";
+    ep.port = 11434;
+    ep.use_tls = false;
+    using K = agentty::http::HttpErrorKind;
+
+    // Refused / never answered: the server may really be down.
+    const auto down = oai::local_transport_hint(ep, 0, K::Connect);
+    CHECK(down.find("is the local server running on localhost:11434") != std::string::npos);
+
+    // Answered 200, then went quiet: it WAS running. That was #108.
+    const auto quiet = oai::local_transport_hint(ep, 200, K::Timeout);
+    CHECK(quiet.find("is the local server running") == std::string::npos);
+    CHECK(quiet.find("answered") != std::string::npos);
+
+    // Answered, then dropped the connection: no misleading hint.
+    CHECK(oai::local_transport_hint(ep, 200, K::PeerClosed).empty());
+}
+
 TEST_CASE("test_build_request_headers") {
     oai::Endpoint def;   // no auth_header_name → Bearer
 

@@ -4,6 +4,18 @@ All notable changes to agentty. Versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+- **Long replies from a local model server no longer die at 30 minutes**
+  (#108). Streams from llama.cpp, Ollama, vLLM and other plain-http servers
+  had a 30-minute total cap meant for hosted APIs, so a slow model writing a
+  long reply was cut off mid-answer with `operation deadline exceeded`. Local
+  servers now have no total cap; 10 minutes of silence still ends a stuck
+  stream, and Esc still cancels.
+- The error for a local server that answered and then went quiet no longer
+  asks whether the server is running.
+- **The Sandbox pane on macOS** lets you set Access to `ports` and shows
+  Scope IPC as on. It was gating both on a Linux-only kernel feature.
+
 ## [0.9.36] - 2026-10-27
 
 ### Added

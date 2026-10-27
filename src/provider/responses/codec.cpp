@@ -944,6 +944,7 @@ provider::StreamResult stream_started(const Site& site,
     hr.host    = target->host;
     hr.port    = target->port;
     hr.path    = target->path;
+    hr.plaintext = target->plaintext;
     hr.headers = target->headers;
     // The SSE anti-buffering trio every streaming transport in agentty sends.
     http::append_sse_no_buffer(hr.headers);
@@ -1007,7 +1008,8 @@ provider::StreamResult stream_started(const Site& site,
         return !ctx.terminated;
     };
 
-    http::Timeouts tos = provider::stream_timeouts();
+    http::Timeouts tos = target->plaintext ? provider::local_stream_timeouts()
+                                           : provider::stream_timeouts();
 
     auto result = http::default_client(::agentty::IoAccess::grant()).stream(hr, sc.handler(), tos, req.cancel);
 

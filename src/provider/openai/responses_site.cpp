@@ -70,6 +70,7 @@ openai_target(const PendingTarget& p, const provider::Request& req) {
     responses::Target t;
     t.host = p.host;
     t.port = p.port;
+    t.plaintext = !p.use_tls;
     t.path = p.path;
     t.headers = {
         {"content-type", "application/json"},

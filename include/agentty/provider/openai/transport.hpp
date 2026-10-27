@@ -214,6 +214,12 @@ void install_probe_hosts(std::set<std::string> hosts);
 // Tests: record what endpoint_speaks_native would have found for this host.
 void set_speaks_native_for_test(const Endpoint& ep, bool native);
 
+// The hint added to a transport error from a LOCAL server. "Is it running?"
+// only when it never answered (`http_status` 0); a timeout after it did
+// answer names that instead (#108). Empty when there's nothing useful to add.
+[[nodiscard]] std::string local_transport_hint(const Endpoint& ep, int http_status,
+                                               http::HttpErrorKind kind);
+
 // ── Custom-host dialect probe ───────────────────────────────────
 // One call answers "what is actually running at this endpoint?" before a
 // custom host is committed. Tries, in order:

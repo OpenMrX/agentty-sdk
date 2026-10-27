@@ -1743,9 +1743,8 @@ provider::StreamResult run_stream_sync(Request req, EventSink sink, http::Cancel
     // Standard ladder with the two local-server deviations: idle=120 s (local
     // generation is slow between tokens) and total=0/unbounded (a big model
     // can legitimately stream for longer than any hosted cap).
-    http::Timeouts tos = provider::stream_timeouts(
+    http::Timeouts tos = provider::local_stream_timeouts(
         std::chrono::milliseconds(120'000));
-    tos.total = std::chrono::milliseconds(0);
 
     // Keep a copy of the cancel token: moved into the stream call, but
     // finish_stream needs it to distinguish a user cancel from a transport
