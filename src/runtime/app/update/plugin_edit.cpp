@@ -386,6 +386,10 @@ Cmd plugin_edit_result(Model& m, PluginEdited e) {
         return Cmd::batch(cmdf::load_plugins_async(/*reconnect=*/false),
                           set_status_toast(m, (e.flag ? "enabled '" : "disabled '")
                                               + e.tool + "'"));
+    case K::SetToolPinned:
+        return Cmd::batch(cmdf::load_plugins_async(/*reconnect=*/false),
+                          set_status_toast(m, (e.flag ? "pinned '" : "unpinned '")
+                                              + e.tool + "'"));
     case K::Approve:
         return Cmd::batch(
             cmdf::load_plugins_async(/*reconnect=*/true),

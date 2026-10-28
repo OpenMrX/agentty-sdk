@@ -27,6 +27,7 @@
 #include <fstream>
 
 #include "agentty/mcp/client.hpp"   // PluginModel, plugin_model()
+#include "agentty/tool/tool_plan.hpp"   // tool loading modes (#98)
 #include <sstream>
 
 namespace fs = std::filesystem;
@@ -110,6 +111,29 @@ std::vector<Item> general(const Model& m) {
             : "off \xc2\xb7 only /compact does it; old turns are trimmed to fit";
         i.hint      = "Enter: toggle";
         i.action    = Action::ToggleAutoCompact;
+        out.push_back(std::move(i));
+    }
+    {
+        // #98. What each mode does, in the row, so nobody has to look it up.
+        const auto mode = agentty::tools::plan::loading_from(m.d.persisted.tool_loading);
+        Item i;
+        i.primary   = "MCP tool loading";
+        switch (mode) {
+            case agentty::tools::plan::Loading::Auto:
+                i.secondary = "auto \xc2\xb7 loads plugin tools that fit, the model "
+                              "searches for the rest";
+                break;
+            case agentty::tools::plan::Loading::All:
+                i.secondary = "all \xc2\xb7 loads every plugin tool, up to the "
+                              "provider's limit";
+                break;
+            case agentty::tools::plan::Loading::OnDemand:
+                i.secondary = "on demand \xc2\xb7 loads only pinned and used tools, "
+                              "the model searches for the rest";
+                break;
+        }
+        i.hint      = "Enter: cycle";
+        i.action    = Action::CycleToolLoading;
         out.push_back(std::move(i));
     }
     // Appearance. A pane, not rows: it is grouped and has its own theme
@@ -271,20 +295,39 @@ std::vector<Item> plugins(const agentty::mcp::PluginModel& model, bool loading) 
         return out;
     }
 
-    // Header: total tools on the wire + budget warning.
+    // Header: how tools load (#98). Every enabled tool is callable; this says
+    // which ride every request and which the model finds with tool_search.
     {
         Item w;
-        if (model.over_budget()) {
-            w.primary   = std::to_string(model.wire_tool_count) +
-                          " tools (budget " + std::to_string(model.tool_budget) + ")";
-            w.secondary = std::to_string(model.trimmed_count) +
-                          " over budget were dropped from this session — "
-                          "disable some below to make room";
-            w.status    = Item::Status::Bad;
+        const std::size_t total = model.enabled_mcp();
+        const std::string mode = model.loading.empty() ? "auto" : model.loading;
+        std::string mode_label = mode == "all"       ? "load all"
+                               : mode == "on_demand" ? "load on demand"
+                                                     : "auto";
+        if (total == 0) {
+            w.primary = std::to_string(model.native_tool_count) + " built-in tools";
+        } else if (model.on_demand_count == 0) {
+            w.primary = std::to_string(total) + " plugin tools, all loaded";
         } else {
-            w.primary   = std::to_string(model.wire_tool_count) +
-                          " tools on the wire";
-            w.secondary = "◉ on / ○ off · Enter toggles · e edits · a adds · d removes";
+            w.primary = std::to_string(model.loaded_count) + " loaded \u00b7 "
+                      + std::to_string(model.on_demand_count)
+                      + " on demand (found with tool_search)";
+        }
+        std::string cost;
+        if (model.schema_tokens > 0) {
+            cost = "~" + std::to_string((model.schema_tokens + 500) / 1000) + "k tokens";
+            if (model.context_window > 0)
+                cost += " (" + std::to_string(model.schema_tokens * 100 / model.context_window)
+                      + "% of context)";
+        }
+        if (model.capped_by_provider) {
+            w.secondary = "this provider takes at most 128 tools per request, so the rest "
+                          "are on demand \u00b7 pin what you need with p";
+            w.status    = Item::Status::Bad;   // amber: needs attention
+        } else {
+            w.secondary = "loading: " + mode_label + (cost.empty() ? "" : " \u00b7 " + cost)
+                        + " \u00b7 Enter toggles \u00b7 p pins \u00b7 e edits \u00b7 a adds"
+                          " \u00b7 d removes";
             w.status    = Item::Status::Neutral;
         }
         out.push_back(std::move(w));
@@ -354,9 +397,12 @@ std::vector<Item> plugins(const agentty::mcp::PluginModel& model, bool loading) 
         for (const auto& t : s.tools) {
             Item ti;
             ti.primary   = t.name;
-            if (t.over_budget && !subtree_inactive) {
-                ti.secondary = "over budget — not on the wire";
-                ti.status    = Item::Status::Bad;
+            if (!subtree_inactive && t.enabled) {
+                // Pinned beats on-demand: a pin always loads.
+                if (t.pinned)
+                    ti.secondary = "pinned \u00b7 always loaded";
+                else if (t.on_demand)
+                    ti.secondary = "on demand";
             }
             ti.action    = Action::ToggleTool;
             ti.arg       = s.name;
@@ -364,6 +410,7 @@ std::vector<Item> plugins(const agentty::mcp::PluginModel& model, bool loading) 
             ti.config_dir = s.config_dir;   // route the exclude edit to THIS server's file
             ti.indented  = true;
             ti.on        = t.enabled;
+            ti.pinned    = t.pinned;
             ti.inactive  = subtree_inactive;
             // Under a disabled plugin, toggling one tool is meaningless —
             // enable the plugin first. Say so instead of "disable/enable".

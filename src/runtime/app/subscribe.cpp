@@ -429,6 +429,7 @@ std::optional<Msg> on_settings_list(const KeyEvent& ev, bool input_active,
         {U'n', [] { return Msg{SettingsListAddStart{}}; }},
         {U'e', [] { return Msg{SettingsListEditOpen{/*add=*/false}}; }},
         {U'd', [] { return Msg{SettingsListRemove{}}; }},
+        {U'p', [] { return Msg{SettingsListPin{}}; }},   // always load this tool (#98)
     };
     return nav::translate(s, ev);
 }

@@ -180,7 +180,7 @@ int main() {
     }
     // The generic mcp_read_resource tool is present and lists resources.
     const tools::ToolDef* read_res = nullptr;
-    for (const auto& t : tools) if (t.name.value == "mcp_read_resource") read_res = &t;
+    for (const auto& t : tools) if (t.name.value == "mcp__resources__read") read_res = &t;
     CHECK(read_res != nullptr);
     if (read_res) {
         auto listing = agentty::tool::DynamicDispatch::execute_with(agtest::cap(),
@@ -212,7 +212,7 @@ int main() {
         }
     }
     const tools::ToolDef* get_prompt = nullptr;
-    for (const auto& t : tools) if (t.name.value == "mcp_get_prompt") get_prompt = &t;
+    for (const auto& t : tools) if (t.name.value == "mcp__prompts__get") get_prompt = &t;
     CHECK(get_prompt != nullptr);
 
     // A required argument left off the line is a usage mistake, so `/name`

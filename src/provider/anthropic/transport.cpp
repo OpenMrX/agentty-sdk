@@ -127,6 +127,7 @@ json tool_spec_to_json(const ToolSpec& s) {
     // `fine-grained-tool-streaming-2025-05-14` beta header on older models
     // (we send that beta unconditionally so the field is always honored).
     if (s.eager_input_streaming) j["eager_input_streaming"] = true;
+    if (s.defer_loading) j["defer_loading"] = true;
     return j;
 }
 
@@ -398,7 +399,15 @@ provider::StreamResult run_stream_sync(Request req, EventSink sink, http::Cancel
         // Tools are session-stable (same catalog every turn), so they get the
         // 1-hour TTL alongside the system prompt — together they form the
         // long-lived prefix that survives idle gaps.
-        tools_j.back()["cache_control"] = kCacheCtl1h;
+        //
+        // A deferred tool can't carry cache_control (400), so the pin goes on
+        // the last tool that isn't deferred. tool_search is last whenever
+        // anything is deferred, so that is normally the very last tool.
+        for (auto it = tools_j.rbegin(); it != tools_j.rend(); ++it)
+            if (!it->value("defer_loading", false)) {
+                (*it)["cache_control"] = kCacheCtl1h;
+                break;
+            }
         body["tools"] = std::move(tools_j);
     }
     body["metadata"] = json{{"user_id", make_user_id()}};

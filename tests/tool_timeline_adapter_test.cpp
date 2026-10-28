@@ -106,16 +106,16 @@ TEST_CASE("tool timeline adapter") {
     check(!visible(external_body)
               && U::tool_timeline_detail(external) == "Long MCP operation",
           "unknown silent MCP tool uses its stable event header");
-    check(U::tool_display_name("mcp_search_tools") == "MCP Tool Search"
-              && U::tool_timeline_detail(make_tool("mcp_search_tools",
+    check(U::tool_display_name("tool_search") == "Tool Search"
+              && U::tool_timeline_detail(make_tool("tool_search",
                   A::ToolUse::Running{}, {{"query", "browser automation"}}))
                   == "browser automation",
-          "MCP catalog broker has a useful label and query");
-    check(U::tool_display_name("mcp_call") == "MCP Call"
-              && U::tool_timeline_detail(make_tool("mcp_call",
-                  A::ToolUse::Running{}, {{"name", "mcp__browser__click"}}))
-                  == "mcp__browser__click",
-          "MCP call broker identifies its target");
+          "tool search has a useful label and query");
+    check(U::tool_display_name("mcp__prompts__get") == "MCP Prompt"
+              && U::tool_timeline_detail(make_tool("mcp__prompts__get",
+                  A::ToolUse::Running{}, {{"name", "summarize"}}))
+                  == "summarize",
+          "MCP prompt broker names its prompt");
 
     auto invisible_live = make_tool("mcp__example__silent", A::ToolUse::Running{},
                                     {{"display_description", "Silent MCP wait"}});

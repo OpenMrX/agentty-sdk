@@ -29,6 +29,7 @@ enum class Action : std::uint8_t {
     Review,
     Threads,
     Settings,
+    Tools,      // open the Plugins pane: what's loaded, on demand, pinned (#98)
     Login,
     Quit,
 };

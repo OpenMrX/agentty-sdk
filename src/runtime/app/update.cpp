@@ -179,14 +179,22 @@ Cmd publish_derived(Model& m, Cmd c) {
         paste_effect = Cmd(PublishPasteConfig{m.d.persisted.paste});
     }
 
+    // MCP tool loading (#98), the same way: the turn worker reads the slot.
+    Cmd loading_effect = Cmd::none();
+    if (!m.published_tool_loading || *m.published_tool_loading != m.d.persisted.tool_loading) {
+        m.published_tool_loading = m.d.persisted.tool_loading;
+        loading_effect = Cmd(PublishToolLoading{m.d.persisted.tool_loading});
+    }
+
     // Nothing moved — the common case, every keystroke — costs no batch.
     if (sel_effect.is_none() && sub_effect.is_none() && web_search_effect.is_none()
-        && paste_effect.is_none())
+        && paste_effect.is_none() && loading_effect.is_none())
         return c;
     // The selection is published before the subagent view, so a worker that
     // reads both sees them describe the same provider.
     return Cmd::batch(std::move(c), std::move(sel_effect), std::move(sub_effect),
-                      std::move(web_search_effect), std::move(paste_effect));
+                      std::move(web_search_effect), std::move(paste_effect),
+                      std::move(loading_effect));
 }
 
 namespace {

@@ -33,6 +33,10 @@ struct ToolSpec {
     // tool/registry.hpp for the full story. Mirrored on the wire as
     // `eager_input_streaming: true` per tool when set.
     bool eager_input_streaming = false;
+    // On demand (#98). Anthropic: sent with `defer_loading: true`, loaded when
+    // tool_search returns a tool_reference to it. Other wires never see a
+    // deferred tool: the planner leaves it out instead.
+    bool defer_loading = false;
 };
 
 // Per-request output cap that matches Claude Code v2.1.113's main-loop

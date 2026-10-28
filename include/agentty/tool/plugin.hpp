@@ -128,6 +128,13 @@ list_servers(const std::filesystem::path& path);
                                           const std::string& bare,
                                           bool enabled);
 
+// Pin or unpin one tool: `tools.pin` in mcp.json. A pinned tool is always
+// loaded, never on demand (#98). Same shape and no-op rule as above.
+[[nodiscard]] EditResult set_tool_pinned(Io, const lock_levels::below_file_lane&, const std::filesystem::path& path,
+                                         const std::string& server,
+                                         const std::string& bare,
+                                         bool pinned);
+
 // True when `bare` is in server's tools.exclude (i.e. disabled).
 [[nodiscard]] bool is_tool_disabled(const std::filesystem::path& path,
                                     const std::string& server,

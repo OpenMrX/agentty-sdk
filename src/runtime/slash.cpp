@@ -40,6 +40,7 @@ const std::vector<Entry>& builtin_actions() {
         action("review",   "Review pending changes",                Action::Review),
         action("threads",  "Open the thread list",                  Action::Threads),
         action("settings", "Open settings",                         Action::Settings),
+        action("tools",    "Plugin tools: loaded, on demand, pinned", Action::Tools),
         action("login",    "Sign in or add an account",             Action::Login),
         action("quit",     "Quit agentty",                          Action::Quit),
     };

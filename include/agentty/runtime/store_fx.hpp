@@ -122,6 +122,12 @@ struct PublishPasteConfig { paste_cfg::Config config; };
 using publish_paste_config =
     maya::pure_fx<PublishPasteConfig, "publish_paste_config">;
 
+/// Install the MCP tool-loading setting the turn workers read (#98). Same
+/// rule: only the dispatch seam returns it.
+struct PublishToolLoading { std::string mode; };
+using publish_tool_loading =
+    maya::pure_fx<PublishToolLoading, "publish_tool_loading">;
+
 /// Re-install the live auth header the stream and subagents use.
 ///
 /// Reducers used to resolve the credential themselves (a read of the

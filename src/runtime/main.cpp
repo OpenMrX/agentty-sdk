@@ -120,6 +120,7 @@
 #include "agentty/provider/selection.hpp"
 #include "agentty/provider/credentials.hpp"
 #include "agentty/tool/web_search_policy.hpp"
+#include "agentty/tool/tool_loading.hpp"
 #include "agentty/tool/skills.hpp"
 #include "agentty/config/inventory.hpp"   // config::cmd_config
 #if defined(AGENTTY_MCP)
@@ -2105,6 +2106,8 @@ int run_main(int argc, char** argv, const maya::unlocked& cap) {
         if (headless) {
             // No Model to publish the web_search policy: load it from settings.
             tools::web_search_policy::seed(::agentty::IoAccess::grant());
+            // Same for MCP tool loading (#98).
+            tools::tool_loading::seed(::agentty::IoAccess::grant());
             // Falls back to the provider's static seed when auth is empty or
             // the network is unreachable, so an offline run still gets a
             // floor. Wrapped anyway: a catalog fetch must never be the thing

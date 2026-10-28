@@ -24,6 +24,8 @@
 #include "agentty/tool/skills.hpp"
 #include "agentty/tool/subagent.hpp"
 #include "agentty/tool/registry.hpp"   // CallContext
+#include "agentty/tool/tool_loading.hpp"
+#include "agentty/tool/tool_plan.hpp"
 #include "agentty/tool/host_call.hpp"
 #include "agentty/tool/tool.hpp"       // tool::DynamicDispatch, ToolUse, Message …
 #include "agentty/tool/util/partial_json.hpp"   // args salvage for truncated tool JSON
@@ -1348,18 +1350,20 @@ provider::StreamResult run_one_completion(Thread& thread,
     auto allowed = [&](const tools::ToolDef& t) -> bool {
         return subagent_tool_allowed(t, type, stats);
     };
-    std::string_view newest_user;
-    for (auto it = req.messages.rbegin(); it != req.messages.rend(); ++it) {
-        if (it->role == Role::User && !it->is_proactive_context()) {
-            newest_user = it->text;
-            break;
-        }
-    }
-    for (const auto* tool : tools::select_wire_tools(newest_user)) {
-        const auto& t = *tool;
-        if (!allowed(t)) continue;
-        req.tools.push_back({t.name.value, t.description, t.input_schema,
-                             t.eager_input_streaming});
+    {
+        // Same plan as the main loop (#98): every allowed tool callable, the
+        // plan decides what rides the wire, tool_search finds the rest. The
+        // run's own history says what it already loaded.
+        const tools::Catalog cat = tools::wire_tools();
+        tools::tool_loading::Request tr;
+        for (const auto& t : *cat)
+            if (!tools::withheld_by_policy(t) && allowed(t)) tr.pool.push_back(&t);
+        tr.loaded = tools::plan::loaded_in(req.messages);
+        tr.limits = tools::tool_loading::limits_for(
+            req.selection ? *req.selection : provider::active(),
+            static_cast<std::size_t>(req.context_window > 0 ? req.context_window : 0));
+        tr.mode   = tools::tool_loading::current();
+        (void)tools::tool_loading::plan_into(tr, req.tools);
     }
 
     Message asst;

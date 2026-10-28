@@ -894,6 +894,8 @@ struct Model {
     std::optional<web_search_cfg::Config> published_web_search;
     // Same, for the paste settings richpaste reads (PublishPasteConfig).
     std::optional<paste_cfg::Config> published_paste;
+    // Same, for MCP tool loading (PublishToolLoading, #98).
+    std::optional<std::string> published_tool_loading;
 
     // The process's launch environment, read ONCE by init() and never again.
     //

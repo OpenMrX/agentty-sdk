@@ -28,6 +28,7 @@
 #include "agentty/runtime/view/palette.hpp"   // ui::palette_context
 #include "agentty/store/store.hpp"
 #include "agentty/tool/subagent.hpp"   // set_smart: the task router's own copy
+#include "agentty/tool/tool_plan.hpp"  // CycleToolLoading (#98)
 #include "agentty/workspace/checkpoint.hpp"
 #include "agentty/runtime/panel/smart_form.hpp"
 #include "agentty/runtime/app/settings_cache.hpp"
@@ -182,6 +183,28 @@ Cmd meta_update(Model& m, msg::MetaMsg mm) {
                 ? "chat names: automatic after the first reply"
                 : "chat names: first line of the first message");
             return Cmd::batch(std::move(save), std::move(cmd));
+        },
+
+        [&](CycleToolLoading) -> Cmd {
+            namespace tp = tools::plan;
+            const auto next = [](tp::Loading l) {
+                switch (l) {
+                    case tp::Loading::Auto:     return tp::Loading::All;
+                    case tp::Loading::All:      return tp::Loading::OnDemand;
+                    case tp::Loading::OnDemand: return tp::Loading::Auto;
+                }
+                return tp::Loading::Auto;
+            }(tp::loading_from(m.d.persisted.tool_loading));
+            m.d.persisted.tool_loading = std::string{tp::to_string(next)};
+            auto save = save_record(m);
+            // publish_derived sees the record move and tells the tool layer.
+            auto toast = set_status_toast(m,
+                next == tp::Loading::All      ? "MCP tools: load all (up to the provider's limit)"
+              : next == tp::Loading::OnDemand ? "MCP tools: load on demand, the model searches"
+                                              : "MCP tools: auto, load what fits");
+            // The Plugins pane counts depend on the mode.
+            return Cmd::batch(std::move(save), std::move(toast),
+                              agentty::app::cmd::load_plugins_async(/*reconnect=*/false));
         },
 
         [&](ToggleAutoCompact) -> Cmd {

@@ -1178,13 +1178,14 @@ struct PluginsUpdated         { mcp::PluginModel model; };
 struct PluginEdited {
     enum class Kind : std::uint8_t {
         SetServerDisabled, SetToolEnabled, Approve, Remove, Add, Update,
+        SetToolPinned,   // tools.pin: always loaded, never on demand (#98)
     };
     enum class From : std::uint8_t { SettingsList, EditPane };
     Kind        kind{};
     From        from{};
     std::string server;
-    std::string tool;          // SetToolEnabled only
-    bool        flag = false;  // SetServerDisabled: disabled; SetToolEnabled: enabled
+    std::string tool;          // SetToolEnabled / SetToolPinned
+    bool        flag = false;  // SetServerDisabled: disabled; SetToolEnabled: enabled; SetToolPinned: pinned
     bool        exit_commit = false;  // EditPane save: a field-exit, pane stays open
     // Which config the edit pane was editing (project mcp.json vs the user
     // one). Echoed so the reply can reopen the pane on the SAME scope, rather
@@ -1198,6 +1199,8 @@ struct PluginEdited {
     bool        parse_error    = false;
 };
 struct SettingsListBackspace  {};
+// `p` on a plugin's tool row: pin it (always loaded) or unpin it (#98).
+struct SettingsListPin        {};
 // Settings hub search: type to search every setting, Backspace to trim.
 struct SettingsSearchInput     { char32_t ch; };
 struct SettingsSearchBackspace {};
@@ -1280,6 +1283,8 @@ struct ToggleChangesStrip {};
 struct ToggleAutoTitle {};
 // Compact the context on its own when it nears the window.
 struct ToggleAutoCompact {};
+// MCP tool loading: auto → load all → load on demand (#98).
+struct CycleToolLoading {};
 struct RestoreCheckpoint { CheckpointId id; };
 // Completion of the async git-restore kicked off by RestoreCheckpoint.
 // `ok=false` carries a human-readable reason in `error`. The transcript
@@ -1497,7 +1502,7 @@ using StatsMsg = std::variant<
 using SettingsListMsg = std::variant<
     OpenSettingsList, CloseSettingsList, SettingsListMove,
     SettingsSearchInput, SettingsSearchBackspace, SettingsSearchClear,
-    SettingsListActivate, SettingsListAddStart, SettingsListRemove,
+    SettingsListActivate, SettingsListAddStart, SettingsListRemove, SettingsListPin,
     SettingsListEditOpen,
     SettingsListChar, SettingsListPaste, PluginsUpdated, PluginEdited,
     SettingsListBackspace, SettingsListSubmitInput, SettingsListCancelInput,
@@ -1555,7 +1560,7 @@ using SandboxMsg = std::variant<
     SandboxEditList, SandboxListKey, SandboxListPaste, SandboxListClose>;
 
 using MetaMsg = std::variant<
-    CompactContext, CycleProfile, ToggleChangesStrip, ToggleAutoTitle, ToggleAutoCompact,
+    CompactContext, CycleProfile, ToggleChangesStrip, ToggleAutoTitle, ToggleAutoCompact, CycleToolLoading,
     RestoreCheckpoint, CheckpointRestored,
     ToggleRetrievedExpanded,
     TerminalFocus,

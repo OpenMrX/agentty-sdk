@@ -299,6 +299,9 @@ Cmd settings_list_update(Model& m, msg::SettingsListMsg sm) {
                 case se::Action::ToggleAutoCompact: {
                     return reenter(m, Msg{ToggleAutoCompact{}});
                 }
+                case se::Action::CycleToolLoading: {
+                    return reenter(m, Msg{CycleToolLoading{}});
+                }
                 // (There is deliberately NO Activate-arm for plugin removal.
                 // Removal is `d` → SettingsListRemove, which is TWO-step —
                 // arm, then confirm. An Enter-fired remove here would be a
@@ -390,6 +393,29 @@ Cmd settings_list_update(Model& m, msg::SettingsListMsg sm) {
                     return Cmd::none();
             }
         },
+        [&](SettingsListPin) -> Cmd {
+            // `p` on a tool row: always load it (#98). Pinned tools never go
+            // on demand, so the model sees them without searching.
+            if (m.ui.plugins_loading) return Cmd::none();
+            auto* o = m.ui.panel.get<pn::SettingsList>();
+            if (!o || o->concern != se::Category::Plugins) return Cmd::none();
+            auto rows = se::items_for(m, o->concern);
+            if (o->index < 0 || o->index >= static_cast<int>(rows.size()))
+                return Cmd::none();
+            const se::Item& row = rows[static_cast<std::size_t>(o->index)];
+            if (row.action != se::Action::ToggleTool || row.arg2.empty())
+                return set_status_toast(m, "p pins a tool: move onto one of a plugin's tools");
+            if (!row.on)
+                return set_status_toast(m, "'" + row.arg2 + "' is disabled; enable it first");
+            m.ui.plugins_loading = true;
+            return cmdf::edit_plugin(edit_target(row, m), PluginEdited{
+                .kind   = PluginEdited::Kind::SetToolPinned,
+                .from   = PluginEdited::From::SettingsList,
+                .server = row.arg,
+                .tool   = row.arg2,
+                .flag   = !row.pinned,
+            });
+        },
         [&](SettingsListRemove) -> Cmd {
             // `d` deletes the highlighted plugin — the deliberate, destructive
             // counterpart to Enter's reversible on/off toggle. Only applies
@@ -450,15 +476,17 @@ Cmd settings_list_update(Model& m, msg::SettingsListMsg sm) {
                     return set_status_toast(m, "could not remove '" + e.server + "'");
                 case K::SetToolEnabled:
                     return set_status_toast(m, "could not toggle '" + e.tool + "'");
+                case K::SetToolPinned:
+                    return set_status_toast(m, "could not pin '" + e.tool + "'");
                 default:
                     return set_status_toast(m, "could not toggle '" + e.server + "'");
                 }
             }
-            // A tool toggle only changed the exclude filter: no respawn, but
-            // the snapshot must reflect the new enabled set, so re-snapshot
-            // the live pool (reconnect=false). Every server-level change does
-            // reconnect, since it changes which processes run.
-            const bool reconnect = (e.kind != K::SetToolEnabled);
+            // A tool toggle or pin only changed a filter: no respawn, but the
+            // snapshot must reflect it, so re-snapshot the live pool
+            // (reconnect=false). Every server-level change does reconnect,
+            // since it changes which processes run.
+            const bool reconnect = e.kind != K::SetToolEnabled && e.kind != K::SetToolPinned;
             std::string toast;
             switch (e.kind) {
             case K::SetServerDisabled:
@@ -468,6 +496,11 @@ Cmd settings_list_update(Model& m, msg::SettingsListMsg sm) {
             case K::SetToolEnabled:
                 toast = (e.flag ? "enabled tool '" : "disabled tool '")
                       + e.tool + "' on " + e.server;
+                break;
+            case K::SetToolPinned:
+                toast = e.flag
+                    ? "pinned '" + e.tool + "': always loaded"
+                    : "unpinned '" + e.tool + "': loads when it fits, else on demand";
                 break;
             case K::Approve:
                 toast = "trusted project config — connecting…";

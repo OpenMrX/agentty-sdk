@@ -8,7 +8,7 @@
 // parsers and the dedup all live in that library, a separate repository.
 // agentty owns the CHOICES and hands them over at three seams:
 //
-//   * advertisement — tools::select_wire_tools decides what goes on the wire
+//   * advertisement — tools::plan decides what goes on the wire
 //   * dispatch      — the bridge's execute closure rewrites the call's args
 //                     (count, exclusions)
 //   * the plan      — tools::web_search_plan turns the slots, language and per-

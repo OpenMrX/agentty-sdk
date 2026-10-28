@@ -267,6 +267,10 @@ struct Settings {
     // save writes only rows that moved off their default.
     web_search_cfg::Config web_search;
 
+    // MCP tool loading (#98): "auto" | "all" | "on_demand". See
+    // tools::plan. Empty = auto, and save writes it only when it moved.
+    std::string tool_loading;
+
     // How Ctrl+V and `agentty paste` read the clipboard (Settings → Paste).
     // Registry rows like web_search: shipped defaults ARE "never touched",
     // and save writes only rows that moved off their default.

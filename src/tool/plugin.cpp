@@ -419,6 +419,37 @@ EditResult set_tool_enabled(Io, const lock_levels::below_file_lane& cap, const f
     }, server, bare, enabled);
 }
 
+EditResult set_tool_pinned(Io, const lock_levels::below_file_lane& cap, const fs::path& path,
+                           const std::string& server, const std::string& bare, bool pinned) {
+    return mutate(cap, path, Need::Existing,
+                  [](json& doc, std::string server, std::string bare, bool pinned) -> Edit {
+    json* found = existing_entry(doc, server);
+    if (!found || !found->is_object()) return EditResult::NotFound;
+    json& entry = *found;
+    json& tools = entry["tools"];
+    if (!tools.is_object()) tools = json::object();
+    json& pin = tools["pin"];
+    if (!pin.is_array()) pin = json::array();
+
+    json rebuilt = json::array();
+    bool present = false;
+    for (const auto& v : pin) {
+        if (v.is_string() && v.get<std::string>() == bare) { present = true; continue; }
+        rebuilt.push_back(v);
+    }
+    if (pinned) rebuilt.push_back(bare);
+    if (pinned == present) {   // already in the desired state
+        if (pin.empty()) tools.erase("pin");
+        if (tools.empty()) entry.erase("tools");
+        return EditResult::Ok;
+    }
+    pin = std::move(rebuilt);
+    if (pin.empty()) tools.erase("pin");
+    if (tools.empty()) entry.erase("tools");
+    return std::nullopt;
+    }, server, bare, pinned);
+}
+
 bool is_tool_disabled(const fs::path& path, const std::string& server,
                       const std::string& bare) {
     for (const auto& d : disabled_tools(path, server))

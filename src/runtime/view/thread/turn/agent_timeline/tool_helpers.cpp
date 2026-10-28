@@ -65,8 +65,9 @@ std::string tool_display_name(const std::string& n) {
     if (n == "skill")           return "Skill";
     if (n == "search_docs")     return "Docs Search";
     if (n == "search_code")     return "Code Search";
-    if (n == "mcp_search_tools") return "MCP Tool Search";
-    if (n == "mcp_call")         return "MCP Call";
+    if (n == "tool_search")         return "Tool Search";
+    if (n == "mcp__resources__read") return "MCP Resource";
+    if (n == "mcp__prompts__get")    return "MCP Prompt";
     // Fallback for any UNMAPPED tool name (MCP-provided tools, a raw name the
     // model emitted, future built-ins not yet in the table above): Title-Case
     // it so the timeline is visually consistent — no tool ever renders as a
@@ -770,14 +771,14 @@ static std::string tool_timeline_detail_base(const ToolUse& tc) {
         auto name = safe("name");
         return name.empty() ? std::string{"\xe2\x80\xa6"} : name;
     }
-    if (n == "search_docs" || n == "search_code" || n == "mcp_search_tools") {
+    if (n == "search_docs" || n == "search_code" || n == "tool_search") {
         auto query = safe("query");
         if (query.empty()) return "\xe2\x80\xa6";
         if (auto nl = query.find('\n'); nl != std::string::npos)
             query = query.substr(0, nl) + " \xe2\x80\xa6";
         return query;
     }
-    if (n == "mcp_call") {
+    if (n == "mcp__prompts__get") {
         auto name = safe("name");
         return name.empty() ? std::string{"\xe2\x80\xa6"} : name;
     }

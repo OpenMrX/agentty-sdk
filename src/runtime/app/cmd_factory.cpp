@@ -34,6 +34,8 @@
 #endif
 #include "agentty/util/dbglog.hpp"
 #include "agentty/tool/registry.hpp"
+#include "agentty/tool/tool_loading.hpp"
+#include "agentty/tool/tool_plan.hpp"
 #include "agentty/tool/skills.hpp"   // active_in: derived "already active" set
 #include "agentty/tool/mcp_tools_backends.hpp"   // rag_apply_settings_now
 #include "agentty/runtime/panel/settings/items.hpp"   // add_plugin_from_line / create_starter
@@ -1314,6 +1316,7 @@ Cmd launch_stream(Model& m) {
             }
         };
 
+        std::unordered_set<std::string> loaded_tools;   // filled on the normal path
         if (compacting) {
             // We stripped the `[1m]` marker from req.model above, so the wire
             // window is the model's BASE (200K), not the 1M the parent picked.
@@ -1335,6 +1338,9 @@ Cmd launch_stream(Model& m) {
             // Worker owns `thread` — move it into the builder so the common
             // no-compaction path relocates the messages vector instead of
             // deep-copying it a second time (see wire_messages_for_impl&&).
+            // What this thread already loaded (#98), read before the move
+            // below empties `thread`.
+            loaded_tools = tools::plan::loaded_in(thread);
             req.messages = wire_messages_for_impl(std::move(thread));
             drop_stale_proactive(req.messages);
             // Adaptive soft-trim: if the wire view is still over the
@@ -1431,19 +1437,26 @@ Cmd launch_stream(Model& m) {
                     return n == "skill" || n == "remember"
                         || n == "forget" || n == "wipe_memory";
                 };
-                std::string_view newest_user;
-                for (auto it = req.messages.rbegin(); it != req.messages.rend(); ++it) {
-                    if (it->role == Role::User && !it->is_proactive_context() && !it->fork_note) {
-                        newest_user = it->text;
-                        break;
-                    }
-                }
-                for (const auto* tool : tools::select_wire_tools(newest_user)) {
-                    const auto& t = *tool;
+                // Every enabled tool stays callable; the plan decides which
+                // schemas ride this request and which the model finds with
+                // tool_search (#98).
+                const tools::Catalog cat = tools::wire_tools();
+                tools::tool_loading::Request tr;
+                for (const auto& t : *cat) {
+                    if (tools::withheld_by_policy(t)) continue;
                     if (weak_model && weak_hidden(t.name.value)) continue;
-                    req.tools.push_back({t.name.value, t.description, t.input_schema,
-                                         t.eager_input_streaming});
+                    tr.pool.push_back(&t);
                 }
+                tr.loaded = std::move(loaded_tools);
+                tr.limits = tools::tool_loading::limits_for(
+                    sel_now, static_cast<std::size_t>(context_max > 0 ? context_max : 0));
+                tr.mode   = tools::tool_loading::current();
+                const auto plan = tools::tool_loading::plan_into(tr, req.tools);
+                AGT_LOG(Model, Debug, "tools.plan",
+                        "mode={} loaded={} on_demand={} wire={} schema_tokens={} window={} capped={}",
+                        tools::plan::to_string(tr.mode), plan.loaded, plan.on_demand,
+                        req.tools.size(), plan.schema_tokens, tr.limits.context_window,
+                        plan.capped_by_provider ? 1 : 0);
             }
         }
 
@@ -2789,7 +2802,9 @@ Cmd load_plugins_async(bool reconnect) {
                 (void)tools::wire_tools();
                 (void)tools::reload_mcp_plugins();
             }
-            out.send(Msg{PluginsUpdated{mcp::plugin_model()}});
+            auto model = mcp::plugin_model();
+            tools::tool_loading::annotate(model);   // loaded / on demand (#98)
+            out.send(Msg{PluginsUpdated{std::move(model)}});
         }, reconnect);
 }
 
@@ -2864,6 +2879,12 @@ Cmd edit_plugin(std::filesystem::path path, PluginEdited reply,
                     // catalog, so the cache must drop it — here, on the
                     // worker, right after the write it depends on, rather
                     // than as a second global poke from the reducer.
+                    if (r.ok) tools::invalidate_mcp_catalog(io);
+                    break;
+                case K::SetToolPinned:
+                    record(pl::set_tool_pinned(io, cap, path, r.server, r.tool, r.flag));
+                    // A pin is baked into the ToolDef (always_expose) at
+                    // projection, so the catalog has to re-project.
                     if (r.ok) tools::invalidate_mcp_catalog(io);
                     break;
                 case K::Approve:

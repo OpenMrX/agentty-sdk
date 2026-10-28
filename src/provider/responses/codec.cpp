@@ -235,6 +235,7 @@ json build_input(const provider::Request& req, std::string_view site) {
 json build_tools(const provider::Request& req) {
     json tools = json::array();
     for (const auto& t : req.tools) {
+        if (t.defer_loading) continue;   // Anthropic-only concept; never here
         // Responses API function tool is FLAT (name/description/parameters at
         // top level), unlike Chat Completions' nested {function:{...}}. The
         // null-schema guard is shared with the Chat/Ollama encoder (SSOT).

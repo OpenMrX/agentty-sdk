@@ -71,6 +71,7 @@ void clear_composer(Model& m) {
         case A::Review:   return emit_msg(m, Msg{OpenDiffReview{}});
         case A::Threads:  return emit_msg(m, Msg{OpenThreadList{}});
         case A::Settings: return emit_msg(m, Msg{OpenSettingsList{settings::Category::General}});
+        case A::Tools:    return emit_msg(m, Msg{OpenSettingsList{settings::Category::Plugins}});
         case A::Login:    return emit_msg(m, Msg{OpenLogin{}});
         case A::Quit:     return emit_msg(m, Msg{Quit{}});
         case A::Rename:

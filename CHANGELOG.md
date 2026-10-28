@@ -4,6 +4,28 @@ All notable changes to agentty. Versions follow [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Every MCP tool is usable, however many a server has** (#98). agentty
+  used to send at most 16 MCP tools per request, picked by matching words
+  in your message, so a 75-tool server lost most of its tools, and a
+  different language or a typo picked the wrong ones. Now:
+  - Every enabled tool is callable by name, always.
+  - Tools load if they fit (MCP tool schemas up to 10% of the context, and
+    at most 128 tools on OpenAI-style providers); the rest are found by the
+    model with the new `tool_search` tool, which handles typos, word forms
+    and server names. A found tool stays loaded for the rest of the thread.
+  - On Anthropic, on-demand tools use the API's own deferred loading, so
+    loading one doesn't break the prompt cache. This works on subscription
+    (OAuth) accounts too.
+  - Settings → General → MCP tool loading: auto, all, or on demand.
+    `AGENTTY_MCP_TOOL_BUDGET` still caps tools per request.
+  - The Plugins pane (also `/tools`) shows how many tools are loaded and
+    on demand, what they cost, and marks each tool. `p` pins a tool so it
+    is always loaded.
+- `mcp_read_resource` and `mcp_get_prompt` are now `mcp__resources__read`
+  and `mcp__prompts__get`. Anthropic's subscription endpoint rejects any
+  tool named `mcp_<letter>...`; the old names still work when called.
+
 ### Fixed
 - **Long replies from a local model server no longer die at 30 minutes**
   (#108). Streams from llama.cpp, Ollama, vLLM and other plain-http servers

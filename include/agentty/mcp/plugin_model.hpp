@@ -21,7 +21,8 @@ struct ToolState {
     std::string name;            // bare advertised name (no mcp__ prefix)
     std::string description;     // advertised description (for the UI)
     bool        enabled = true;  // NOT in config tools.exclude
-    bool        over_budget = false; // enabled but trimmed from the wire
+    bool        pinned = false;  // config tools.pin: always loaded, never on demand
+    bool        on_demand = false; // enabled, not loaded now; tool_search finds it
 };
 
 // Where a server's config entry was read from — enough for the picker to
@@ -73,14 +74,17 @@ struct PluginModel {
     std::vector<ServerState> servers;
     std::vector<PromptState> prompts;  // every connected server's prompts
     std::size_t native_tool_count = 0; // agentty's own tools (always shipped)
-    std::size_t wire_tool_count   = 0; // total tools actually on the wire
-    std::size_t tool_budget       = 0; // soft cap (0 = unset)
-    std::size_t trimmed_count     = 0; // enabled MCP tools dropped for budget
-
-    [[nodiscard]] bool over_budget() const noexcept {
-        return tool_budget > 0 && wire_tool_count > tool_budget;
-    }
-    [[nodiscard]] std::size_t trimmed() const noexcept { return trimmed_count; }
+    // How a fresh thread on the active provider would load tools (#98).
+    std::string loading;               // "auto" | "all" | "on_demand"
+    std::size_t loaded_count      = 0; // schemas on the wire
+    std::size_t on_demand_count   = 0; // enabled, found with tool_search
+    std::size_t schema_tokens     = 0; // what the loaded schemas cost
+    std::size_t context_window    = 0; // the active model's, 0 = unknown
+    // A hard provider limit (OpenAI/Gemini: 128 tools) put tools on demand
+    // even though the setting is "all".
+    bool        capped_by_provider = false;
+    // Set by a test or a headless caller that has no live provider.
+    [[nodiscard]] std::size_t enabled_mcp() const noexcept { return loaded_count + on_demand_count; }
 };
 
 } // namespace agentty::mcp

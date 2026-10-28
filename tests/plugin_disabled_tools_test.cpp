@@ -12,6 +12,7 @@
 
 #include "agtest_cap.hpp"
 #include "agentty/tool/registry.hpp"
+#include "agentty/tool/tool_loading.hpp"
 #include "agentty/mcp/client.hpp"
 #include "agentty/tool/plugin.hpp"
 
@@ -129,24 +130,24 @@ int main() {
           "re-enabled server shows its tools again (got "
           + std::to_string(reenabled) + ")");
 
-    // 5. A DISABLED server's cached tools must NOT count against the wire
-    //    budget (they're display-only, not on the wire). Compare wire_tool_
-    //    count enabled vs disabled — disabling must DROP it by kN.
+    // 5. A DISABLED server's cached tools are display-only: they never count
+    //    as loaded or on demand (#98), and annotate never marks them.
     {
         auto m_on = mcp::plugin_model();
+        tools::tool_loading::annotate(m_on);
         (void)tools::plugin::set_server_disabled(::agentty::IoAccess::grant(), agtest::cap(), cfg, "demo", true);
         (void)tools::reload_mcp_plugins();
         auto m_off = mcp::plugin_model();
-        check(m_off.wire_tool_count + kN == m_on.wire_tool_count,
-              "budget: disabling drops wire_tool_count by its tool count "
-              "(on=" + std::to_string(m_on.wire_tool_count) + " off="
-              + std::to_string(m_off.wire_tool_count) + ")");
-        // And none of the disabled server's tools are flagged over_budget.
-        bool any_ob = false;
+        tools::tool_loading::annotate(m_off);
+        check(m_off.enabled_mcp() + kN == m_on.enabled_mcp(),
+              "disabling drops the plugin tool count by its tool count "
+              "(on=" + std::to_string(m_on.enabled_mcp()) + " off="
+              + std::to_string(m_off.enabled_mcp()) + ")");
+        bool any_marked = false;
         for (const auto& s : m_off.servers)
             if (s.name == "demo")
-                for (const auto& t : s.tools) if (t.over_budget) any_ob = true;
-        check(!any_ob, "budget: a disabled server's tools are never over_budget");
+                for (const auto& t : s.tools) if (t.on_demand) any_marked = true;
+        check(!any_marked, "a disabled server's tools are never marked on demand");
         (void)tools::plugin::set_server_disabled(::agentty::IoAccess::grant(), agtest::cap(), cfg, "demo", false);
         (void)tools::reload_mcp_plugins();
     }

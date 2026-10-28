@@ -279,6 +279,26 @@ void write_tool_result_block(std::string& out, const ToolUse& tc,
         // superseded read always serialises identically — no cache churn.
         json_write_field(out, "content",
             std::string{wire::kSupersededReadPointer}, first);
+    } else if (const auto refs = wire::tool_search_references(tc); !refs.empty()) {
+        // tool_search on the Anthropic wire: answer with tool_reference
+        // blocks, which the API expands into the deferred tools' schemas
+        // itself. ONLY references: the API 400s a tool_result that mixes
+        // them with a text block ("Tool definitions ... cannot be mixed with
+        // other content"), measured on the live endpoint.
+        if (!first) out.push_back(',');
+        first = false;
+        out.append("\"content\":[");
+        bool block_first = true;
+        for (const auto& name : refs) {
+            if (!block_first) out.push_back(',');
+            block_first = false;
+            out.push_back('{');
+            bool rf = true;
+            json_write_field(out, "type", "tool_reference", rf);
+            json_write_field(out, "tool_name", name, rf);
+            out.push_back('}');
+        }
+        out.push_back(']');
     } else if (!wire::wire_tool_result_images(tc).empty()) {
         // Vision tool_result: Anthropic accepts an ARRAY of content blocks for a
         // tool_result, so emit the text (aged-budgeted) followed by one image

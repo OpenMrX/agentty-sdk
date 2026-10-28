@@ -381,33 +381,11 @@ struct Found {
 // snapshot it enumerates.
 [[nodiscard]] std::string unknown_tool_error(std::string_view name);
 
-// Build a bounded per-turn catalog: all native/pinned tools plus the external
-// MCP tools most relevant to the current user request. The pointers point
-// into `catalog`, which the result keeps alive.
-struct Selected {
-    Catalog                     catalog;
-    std::vector<const ToolDef*> tools;
-    [[nodiscard]] auto begin() const noexcept { return tools.begin(); }
-    [[nodiscard]] auto end()   const noexcept { return tools.end(); }
-    [[nodiscard]] bool empty() const noexcept { return tools.empty(); }
-    [[nodiscard]] std::size_t size() const noexcept { return tools.size(); }
-};
-[[nodiscard]] Selected select_wire_tools(
-    std::string_view query, std::size_t max_external = 16);
-// Same selection over an explicit catalog (pure; for tests). Natives and
-// pinned tools always; the top `max_external` other tools by query score,
-// emitted in CATALOG order so the wire tools block (the head of the prompt
-// cache prefix) stays byte-stable while the chosen set is unchanged.
-//
-// `web_search_enabled` = false drops the native web_search (Settings → Web
-// Search). select_wire_tools() passes the live policy; tests pass it
-// directly.
-[[nodiscard]] std::vector<const ToolDef*> select_wire_tools_from(
-    const std::vector<ToolDef>& catalog, std::string_view query,
-    std::size_t max_external = 16, bool web_search_enabled = true);
+// Which tools ride a request, and how the model finds the rest, is
+// tools::plan (tool_plan.hpp). Every enabled tool stays callable by name.
 
 // agentty's settings decide which of its native tools exist for ANY consumer:
-// the model on the wire (select_wire_tools) and other MCP clients through
+// the model on the wire (tools::plan) and other MCP clients through
 // `agentty mcp-serve`. One predicate, so the two can never disagree. Today the
 // only rule is Settings → Web Search: web_search off withholds the NATIVE
 // web_search (an external MCP tool that happens to share the name is not

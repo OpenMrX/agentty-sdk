@@ -3,6 +3,8 @@
 #include "agentty/mcp/client.hpp"
 #include "agentty/tool/mcp_tools_bridge.hpp"
 #include "agentty/tool/web_search_policy.hpp"
+#include "agentty/tool/tool_loading.hpp"
+#include "agentty/tool/tool_plan.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -134,6 +136,12 @@ maya::published<const Snapshot>& catalog() {
 }
 
 std::shared_ptr<const Snapshot> make_snapshot(std::vector<ToolDef> tools, unsigned long generation) {
+    // tool_search is always dispatchable (#98). Whether it rides the wire is
+    // the planner's call; whether it RUNS must not depend on what was sent,
+    // or a model that saw it last turn gets "unknown tool".
+    if (std::none_of(tools.begin(), tools.end(), [](const ToolDef& t) {
+            return t.name.value == plan::kSearchToolName; }))
+        tools.push_back(tool_loading::search_tool());
     std::unordered_map<std::string, std::size_t> idx;
     idx.reserve(tools.size());
     for (std::size_t i = 0; i < tools.size(); ++i) idx.emplace(tools[i].name.value, i);
@@ -153,7 +161,7 @@ std::shared_ptr<const Snapshot> native_only() {
 // caller that connects: it froze the UI when it beat init's warm-up task to
 // the first access. A find() before the connect sees the native tools, the
 // same as any caller arriving mid-connect. Every other access may connect:
-// on ACP and `agentty run` the first select_wire_tools() on a turn worker is
+// on ACP and `agentty run` the first wire_tools() on a turn worker is
 // what brings MCP up.
 enum class Connect { May, Never };
 
@@ -267,6 +275,10 @@ void invalidate_catalog() {
         return true;
     };
     if (ieq(trimmed, "bash")) return "shell";
+    // Renamed off the `mcp_` prefix Anthropic OAuth rejects; saved threads
+    // and habit still call the old names.
+    if (ieq(trimmed, "mcp_read_resource")) return "mcp__resources__read";
+    if (ieq(trimmed, "mcp_get_prompt")) return "mcp__prompts__get";
     return name;
 }
 
@@ -306,82 +318,6 @@ bool withheld_by_policy(const ToolDef& tool, bool web_search_enabled) {
 bool withheld_by_policy(const ToolDef& tool) {
     return withheld_by_policy(
         tool, web_search_cfg::mode(web_search_policy::current()) != web_search_cfg::Mode::Off);
-}
-
-Selected select_wire_tools(
-    std::string_view query, std::size_t max_external) {
-    Catalog cat = wire_tools();
-    auto picked = select_wire_tools_from(*cat, query, max_external,
-                                         web_search_cfg::mode(web_search_policy::current())
-                                             != web_search_cfg::Mode::Off);
-    return Selected{std::move(cat), std::move(picked)};
-}
-
-std::vector<const ToolDef*> select_wire_tools_from(
-    const std::vector<ToolDef>& catalog, std::string_view query, std::size_t max_external,
-    bool web_search_enabled) {
-    std::vector<const ToolDef*> selected;
-    std::vector<std::pair<int, const ToolDef*>> candidates;
-    selected.reserve(catalog.size());
-
-    std::string q;
-    q.reserve(query.size());
-    for (unsigned char c : query)
-        q.push_back(std::isalnum(c) ? static_cast<char>(std::tolower(c)) : ' ');
-    std::vector<std::string> terms;
-    for (std::size_t pos = 0; pos < q.size();) {
-        while (pos < q.size() && q[pos] == ' ') ++pos;
-        const auto begin = pos;
-        while (pos < q.size() && q[pos] != ' ') ++pos;
-        if (pos - begin >= 2) terms.emplace_back(q.substr(begin, pos - begin));
-    }
-
-    for (const auto& tool : catalog) {
-        // Dispatch-only tools (passthrough fulfilling a proxy-advertised
-        // schema) never enter the wire list — the proxy already injected
-        // their schema into the request; ours would collide with it.
-        if (!tool.advertise) continue;
-        // Settings → Web Search can switch web_search off. Dropped here, by
-        // name and before the native fast path, so it leaves the wire in every
-        // mode that builds a request through this function. Removing it keeps
-        // the remaining tools in catalog order, so the tools block stays
-        // byte-stable from one turn to the next once the setting is chosen.
-        // The same predicate gates `agentty mcp-serve` (mcp/serve.cpp).
-        if (withheld_by_policy(tool, web_search_enabled))
-            continue;
-        if (tool.origin == ToolOrigin::Native || tool.always_expose) {
-            selected.push_back(&tool);
-            continue;
-        }
-        std::string haystack = tool.name.value + " " + tool.origin_id + " " + tool.description;
-        std::ranges::transform(haystack, haystack.begin(),
-            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        int score = 0;
-        for (const auto& term : terms) {
-            if (tool.name.value.find(term) != std::string::npos) score += 8;
-            if (tool.origin_id.find(term) != std::string::npos) score += 5;
-            if (haystack.find(term) != std::string::npos) score += 2;
-        }
-        candidates.emplace_back(score, &tool);
-    }
-
-    if (candidates.size() <= max_external) {
-        for (const auto& [_, tool] : candidates) selected.push_back(tool);
-        return selected;
-    }
-    std::stable_sort(candidates.begin(), candidates.end(),
-        [](const auto& a, const auto& b) { return a.first > b.first; });
-    // Score decides WHICH tools make the cut, never their ORDER on the wire.
-    // The tools block is the head of the prompt-cache prefix (tools → system
-    // → messages), so emitting in score order reordered it on every user
-    // message even when the chosen set was the same, busting the whole cache.
-    // Emit the chosen ones in catalog order: same set, same bytes.
-    std::vector<const ToolDef*> chosen;
-    chosen.reserve(max_external);
-    for (std::size_t i = 0; i < max_external; ++i) chosen.push_back(candidates[i].second);
-    std::ranges::sort(chosen, std::less<>{});   // catalog is one contiguous vector
-    for (const auto* t : chosen) selected.push_back(t);
-    return selected;
 }
 
 unsigned long mcp_generation() noexcept {

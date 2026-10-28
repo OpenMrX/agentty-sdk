@@ -49,6 +49,7 @@ namespace agentty::provider::wire {
     const std::vector<provider::ToolSpec>& tools) {
     nlohmann::json arr = nlohmann::json::array();
     for (const auto& t : tools) {
+        if (t.defer_loading) continue;   // Anthropic-only concept; never here
         arr.push_back({
             {"type", "function"},
             {"function", {
@@ -164,6 +165,32 @@ wire_tool_result_images(const ToolUse& tc, unsigned max_side = util::kMaxWireIma
     std::vector<const ImageContent*> out;
     for (const auto& img : tc.done_images())
         if (wire_image_sendable(img, max_side)) out.push_back(&img);
+    return out;
+}
+
+// tool_search results (#98). The tool writes one `loaded: <name>` line per
+// hit; on the Anthropic wire those become tool_reference blocks and the rest
+// of the text is the note. Kept in step with tools::plan::kLoadedMarker.
+inline constexpr std::string_view kToolSearchName = "tool_search";
+inline constexpr std::string_view kToolSearchLoaded = "loaded: ";
+
+[[nodiscard]] inline std::vector<std::string>
+tool_search_references(const ToolUse& tc) {
+    std::vector<std::string> out;
+    if (tc.name.value != kToolSearchName || !tc.is_done()) return out;
+    std::string_view text = tc.output();
+    while (!text.empty()) {
+        const auto nl = text.find('\n');
+        std::string_view line = text.substr(0, nl);
+        if (line.starts_with(kToolSearchLoaded)) {
+            line.remove_prefix(kToolSearchLoaded.size());
+            if (const auto sp = line.find(' '); sp != std::string_view::npos)
+                line = line.substr(0, sp);
+            if (!line.empty()) out.emplace_back(line);
+        }
+        if (nl == std::string_view::npos) break;
+        text.remove_prefix(nl + 1);
+    }
     return out;
 }
 

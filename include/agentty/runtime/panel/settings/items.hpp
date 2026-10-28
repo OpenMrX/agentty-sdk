@@ -48,6 +48,7 @@ enum class Action : std::uint8_t {
     ToggleChangesStrip, // General: show/hide the persistent "N changes" banner
     ToggleAutoTitle,    // General: name new chats with the utility model
     ToggleAutoCompact,  // General: compact the context on its own near the window
+    CycleToolLoading,   // General: MCP tool loading auto / all / on demand (#98)
     // (No RemovePlugin: removal is the two-step `d` → SettingsListRemove
     // flow, never an Enter action — a one-press destructive Enter and a
     // two-step d coexisting was a trap. See the reducer's Activate arm.)
@@ -107,6 +108,7 @@ struct Item {
     Category    target = Category::General;  // the list an OpenList row opens
     bool        indented = false;  // render as a sub-row (a plugin's tool)
     bool        on = true;         // toggle state (for ToggleTool rows)
+    bool        pinned = false;    // ToggleTool rows: tools.pin, always loaded (#98)
     // Effectively inactive though PRESENT: a tool under a DISABLED (or not-
     // connected) plugin. Its individual on/off is still shown (◉/○) so you
     // know what it'll be when the plugin comes back, but the whole row is

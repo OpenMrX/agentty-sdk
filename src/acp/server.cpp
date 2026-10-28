@@ -49,6 +49,8 @@
 #include "agentty/runtime/view/helpers.hpp"
 #include "agentty/tool/policy.hpp"
 #include "agentty/tool/registry.hpp"
+#include "agentty/tool/tool_loading.hpp"
+#include "agentty/tool/tool_plan.hpp"
 #include "agentty/runtime/app/update/stream_args.hpp"  // canonify_tool_args (`cmd`→`command`)
 #include "agentty/runtime/app/cmd_factory.hpp"        // wire_messages_for, compaction prompts
 #include "agentty/tool/commands.hpp"
@@ -2893,14 +2895,6 @@ StopReason AgentServer::stream_completion(Io io, const Cap& cap, const std::stri
     // and answers the user in plain text (proven: qwen2.5-coder:7b greets
     // cleanly only when no tools are on the wire).
     if (!suppress_tools) {
-        std::string_view newest_user;
-        for (auto it = req.messages.rbegin(); it != req.messages.rend(); ++it) {
-            if (it->role == Role::User && !it->is_proactive_context()) {
-                newest_user = it->text;
-                break;
-            }
-        }
-        auto selected = tools::select_wire_tools(newest_user);
         // Weak local models hallucinate `skill` and the memory tools on
         // greetings/small talk — don't advertise them (mirrors cmd_factory).
         const bool weak = is_weak_model(req.model);
@@ -2908,12 +2902,21 @@ StopReason AgentServer::stream_completion(Io io, const Cap& cap, const std::stri
             return n == "skill" || n == "remember"
                 || n == "forget" || n == "wipe_memory";
         };
-        req.tools.reserve(selected.size());
-        for (const auto* tool : selected) {
-            if (weak && weak_hidden(tool->name.value)) continue;
-            req.tools.push_back({tool->name.value, tool->description,
-                                 tool->input_schema, tool->eager_input_streaming});
+        // Same plan as the TUI (#98): every enabled tool callable, the plan
+        // decides what rides the wire, tool_search finds the rest.
+        const tools::Catalog cat = tools::wire_tools();
+        tools::tool_loading::Request tr;
+        for (const auto& t : *cat) {
+            if (tools::withheld_by_policy(t)) continue;
+            if (weak && weak_hidden(t.name.value)) continue;
+            tr.pool.push_back(&t);
         }
+        tr.loaded = tools::plan::loaded_in(req.messages);
+        tr.limits = tools::tool_loading::limits_for(
+            provider::active(),
+            static_cast<std::size_t>(std::max(0, catalog_context_window_for(req.model))));
+        tr.mode   = tools::tool_loading::current();
+        (void)tools::tool_loading::plan_into(tr, req.tools);
     }
 
     Message assistant;

@@ -13,8 +13,8 @@
 //   • tools/list + tools/call        — wrapped as ToolDefs (always)
 //   • tool annotations               — readOnlyHint/destructiveHint → EffectSet
 //   • structured + non-text content  — preserved in the rendered output
-//   • resources/list + resources/read — `mcp_read_resource` tool + accessors
-//   • prompts/list + prompts/get     — `mcp_get_prompt` tool + accessors
+//   • resources/list + resources/read — `mcp__resources__read` tool + accessors
+//   • prompts/list + prompts/get     — `mcp__prompts__get` tool + accessors
 //   • tools/list_changed (+ res/prompts) — live snapshot rebuilt on notify
 //   • pagination (nextCursor)        — followed in the cap layer
 //
@@ -105,28 +105,6 @@ struct ConnectionPool {
     // the user "connected" vs "failed: <reason>".
     std::unordered_map<std::string, std::string> connect_errors;
 };
-
-// Soft cap on total tools carried on the wire (native + enabled MCP). Past
-// this, the projection trims MCP tools (native always ship) and the model
-// reports over_budget so the picker can warn. Sized generously — the point
-// is to catch runaway plugin sets, not to police a healthy toolset.
-//
-// Configurable via $AGENTTY_MCP_TOOL_BUDGET: a positive value sets the cap,
-// 0 disables the cap entirely, anything unparsable or negative keeps the
-// default. Same env pattern as call_timeout() below — read live, never
-// cached, so tests (and a restarted session) pick changes up immediately.
-std::size_t tool_budget() {
-    constexpr std::size_t kDefaultToolBudget = 100;
-    if (const char* e = std::getenv("AGENTTY_MCP_TOOL_BUDGET"); e && e[0]) {
-        try {
-            const long v = std::stol(e);
-            if (v >= 0) return static_cast<std::size_t>(v);
-        } catch (const std::exception& ex) {
-            util::dbglog("mcp.tool_budget.env", ex.what());
-        }
-    }
-    return kDefaultToolBudget;
-}
 
 namespace {
 
@@ -266,6 +244,7 @@ struct ConfigServer {
     std::string type;            // "stdio" | "http" | "sse" | "passthrough" | "" (inferred)
     std::vector<std::string> args;   // stdio command args (part of spawn identity)
     std::unordered_set<std::string> exclude;
+    std::unordered_set<std::string> pin;     // tools.pin: always loaded (#98)
     bool disabled = false;
     scope::Source source;        // WHERE this entry was read from (provenance)
     // type == "passthrough": user-declared foreign tools (a proxy/gateway
@@ -377,6 +356,9 @@ void read_one_doc(const json& doc, const scope::Source& src, const fs::path& fil
             if (tj.contains("exclude") && tj["exclude"].is_array())
                 for (const auto& v : tj["exclude"])
                     if (v.is_string()) cs.exclude.insert(v.get<std::string>());
+            if (tj.contains("pin") && tj["pin"].is_array())
+                for (const auto& v : tj["pin"])
+                    if (v.is_string()) cs.pin.insert(v.get<std::string>());
         }
         // type:"passthrough" — declared foreign tools. Entries may be bare
         // strings (name only) or objects {name, description?, advertise?}.
@@ -731,7 +713,10 @@ tools::ToolDef make_tool(PoolHandle pool, const ::mcp::Tool& t,
 
 tools::ToolDef make_read_resource_tool(PoolHandle pool) {
     tools::ToolDef def;
-    def.name        = ToolName{"mcp_read_resource"};
+    // Not `mcp_read_resource`: Anthropic's subscription endpoint 400s every
+    // request carrying a tool named `mcp_` + letter ("out of extra usage").
+    // The `mcp__server__tool` shape every MCP tool uses is fine.
+    def.name        = ToolName{"mcp__resources__read"};
     def.description =
         "[MCP] Read the contents of an MCP resource by URI. Resources are "
         "server-provided documents/data (files, DB rows, API docs). Call with "
@@ -841,7 +826,7 @@ std::optional<std::string> resolve_prompt_route(
 
 tools::ToolDef make_get_prompt_tool(PoolHandle pool) {
     tools::ToolDef def;
-    def.name        = ToolName{"mcp_get_prompt"};
+    def.name        = ToolName{"mcp__prompts__get"};   // see make_read_resource_tool
     def.description =
         "[MCP] Render an MCP prompt template provided by a server. Call with no "
         "args (or {\"list\":true}) to LIST every prompt, its name, and its "
@@ -933,16 +918,9 @@ std::optional<std::string> resolve_tool_route(
 
 // ── "is this tool actually enabled?" ──────────────────────────────────
 //
-// Two sources, both of which projection already consults: the per-server
-// policy baked at connect (tools.include / tools.exclude) and the LIVE config
-// exclude that the Plugins pane toggle writes.
-//
-// This used to be spelled inline inside project_tools only, which meant
-// mcp_call and mcp_search_tools -- both of which go straight to the registry
-// -- ignored it completely. A tool the user switched off stayed advertised by
-// search and stayed callable by mcp_call; the toggle only removed it from the
-// inline catalog. A deny that merely hides something is not a deny, so the
-// check lives here and every path reads the same function.
+// Two sources: the per-server policy baked at connect (tools.include /
+// tools.exclude) and the LIVE config exclude the Plugins pane toggle writes.
+// One function, so a tool switched off is off on every path.
 [[nodiscard]] std::unordered_map<std::string, std::unordered_set<std::string>>
 live_exclude_map() {
     std::unordered_map<std::string, std::unordered_set<std::string>> m;
@@ -966,144 +944,6 @@ live_exclude_map() {
         le != live_excl.end() && le->second.contains(bare))
         return false;
     return true;
-}
-
-tools::ToolDef make_search_tools_tool(PoolHandle pool) {
-    tools::ToolDef def;
-    def.name = ToolName{"mcp_search_tools"};
-    def.description =
-        "Search connected MCP capability catalogs by meaning. Use this when "
-        "the needed integration is not already visible as a direct mcp__ tool; "
-        "then invoke it through mcp_call.";
-    def.input_schema = json{
-        {"type", "object"},
-        {"properties", json{
-            {"query", json{{"type", "string"}, {"description", "Capability or action to find."}}},
-            {"k", json{{"type", "integer"}, {"minimum", 1}, {"maximum", 20}, {"default", 8}}},
-        }},
-        {"required", json::array({"query"})},
-    };
-    def.origin = tools::ToolOrigin::Mcp;
-    def.origin_id = "catalog";
-    // Not Pure. Pure means "no IO at all", which is the one class the policy
-    // allows even under Minimal -- and this walks the registry, which can
-    // trigger a blocking list_tools RPC to every connected server
-    // (cap/registry.hpp rebuild_ -> provider->list()). ReadFs|Net is what a
-    // read-only MCP tool carries, and this reads the same servers' catalogs,
-    // so it carries the same thing. Effects describe what a tool CAN reach,
-    // not how harmless its intent is.
-    def.effects = tools::EffectSet{tools::Effect::ReadFs, tools::Effect::Net};
-    def.scheduling_effects = def.effects;
-    def.max_output_chars = 12'000;
-    def.always_expose = true;
-    def.execute = [pool](const maya::unlocked&, const json& args, const tools::CallContext&) -> tools::ExecResult {
-        const std::string query = args.value("query", std::string{});
-        if (query.empty())
-            return std::unexpected(tools::ToolError::invalid_args("query is required"));
-        const int k = std::clamp(args.value("k", 8), 1, 20);
-        std::string needle = query;
-        std::ranges::transform(needle, needle.begin(),
-            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-        std::vector<std::pair<int, ::mcp::Tool>> ranked;
-        const auto live_excl = live_exclude_map();
-        std::vector<::mcp::Tool> visible;
-        {
-            for (auto& t : pool->registry.tools())
-                if (tool_enabled(pool, t.name, live_excl))
-                    visible.push_back(std::move(t));
-        }
-        for (auto tool : visible) {
-            std::string text = tool.name + " " + tool.description.value_or("");
-            std::ranges::transform(text, text.begin(),
-                [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-            int score = text.find(needle) != std::string::npos ? 20 : 0;
-            std::size_t pos = 0;
-            while (pos < needle.size()) {
-                while (pos < needle.size() && !std::isalnum(static_cast<unsigned char>(needle[pos]))) ++pos;
-                auto begin = pos;
-                while (pos < needle.size() && std::isalnum(static_cast<unsigned char>(needle[pos]))) ++pos;
-                if (pos - begin > 1 && text.find(needle.substr(begin, pos - begin)) != std::string::npos)
-                    score += 3;
-            }
-            ranked.emplace_back(score, std::move(tool));
-        }
-        std::stable_sort(ranked.begin(), ranked.end(),
-            [](const auto& a, const auto& b) { return a.first > b.first; });
-        std::string out;
-        for (int i = 0; i < k && i < static_cast<int>(ranked.size()); ++i) {
-            const auto& tool = ranked[static_cast<std::size_t>(i)].second;
-            out += "- `" + canonical_mcp_name(tool.name) + "`";
-            if (tool.description && !tool.description->empty()) {
-                // Server-supplied bytes — scrub + one-line clip per row.
-                std::string d = tools::util::to_valid_utf8(
-                    tools::util::strip_terminal_controls(*tool.description));
-                for (auto& c : d) if (c == '\n' || c == '\r') c = ' ';
-                if (d.size() > 200) {
-                    d.resize(200);
-                    d = tools::util::to_valid_utf8(std::move(d));
-                    d += "…";
-                }
-                out += " — " + d;
-            }
-            out += '\n';
-        }
-        return tools::ToolOutput{out.empty() ? "(no MCP tools available)" : out, std::nullopt};
-    };
-    return def;
-}
-
-tools::ToolDef make_call_tool(PoolHandle pool) {
-    tools::ToolDef def;
-    def.name = ToolName{"mcp_call"};
-    def.description =
-        "Call a connected MCP tool discovered with mcp_search_tools. Direct "
-        "mcp__ tools are preferred when visible because their typed schema is safer.";
-    def.input_schema = json{
-        {"type", "object"},
-        {"properties", json{
-            {"name", json{{"type", "string"}, {"description", "Canonical mcp__server__tool name."}}},
-            {"arguments", json{{"type", "object"}, {"description", "Arguments for the target tool."}}},
-        }},
-        {"required", json::array({"name", "arguments"})},
-    };
-    def.origin = tools::ToolOrigin::Mcp;
-    def.origin_id = "catalog";
-    def.effects = tools::EffectSet{tools::Effect::Exec, tools::Effect::WriteFs,
-                                   tools::Effect::Net, tools::Effect::ReadFs};
-    def.scheduling_effects = tools::EffectSet{tools::Effect::Exec};
-    def.max_output_chars = 30'000;
-    def.always_expose = true;
-    def.execute = [pool](const maya::unlocked&, const json& args, const tools::CallContext& ctx) -> tools::ExecResult {
-        const std::string name = args.value("name", std::string{});
-        const json call_args = args.contains("arguments") && args["arguments"].is_object()
-            ? args["arguments"] : json::object();
-        auto route = resolve_tool_route(pool->registry, name);
-        if (!route)
-            return std::unexpected(tools::ToolError::not_found(
-                "MCP tool is missing or ambiguous: " + name));
-        // The user's toggle binds here too, not just in the inline catalog --
-        // otherwise mcp_call is a documented way around it.
-        {
-            const auto live_excl = live_exclude_map();
-            if (!tool_enabled(pool, *route, live_excl))
-                return std::unexpected(tools::ToolError::denied(
-                    "MCP tool '" + name + "' is disabled. Enable it in the "
-                    "Plugins pane, or remove it from tools.exclude in "
-                    "mcp.json."));
-        }
-        ::mcp::cap::Request req{*route, call_args, ctx.progress,
-                                [&ctx] { return ctx.cancelled(); }};
-        req.elicit = ctx.elicit;
-        auto result = pool->registry.dispatch(req);
-        if (result.is_error)
-            return std::unexpected(tools::ToolError::subprocess(
-                result.text.empty() ? "MCP tool reported an error"
-                                    : tools::util::to_valid_utf8(
-                                          tools::util::strip_terminal_controls(result.text))));
-        auto text = render_result(result);
-        return tools::ToolOutput{text.empty() ? "(no output)" : text, std::nullopt};
-    };
-    return def;
 }
 
 // Build the full ToolDef vector for a pool: every server tool + the generic
@@ -1244,6 +1084,11 @@ std::vector<tools::ToolDef> project_tools(PoolHandle pool) {
     // Plugins pane appeared to do nothing.
     std::unordered_map<std::string, std::unordered_set<std::string>> live_excl =
         live_exclude_map();
+    // Pins read live too, so `p` in the Plugins pane applies on the next turn
+    // without reconnecting the server.
+    std::unordered_map<std::string, std::unordered_set<std::string>> live_pins;
+    for (const auto& [sname, cs] : read_config_servers())
+        if (!cs.pin.empty()) live_pins[sname] = cs.pin;
 
     {
         for (auto& t : pool->registry.tools()) {
@@ -1253,54 +1098,26 @@ std::vector<tools::ToolDef> project_tools(PoolHandle pool) {
             const ServerPolicy fallback;
             const auto& policy = policy_it == pool->policies.end()
                 ? fallback : policy_it->second;
-            out.push_back(make_tool(pool, t, policy));
+            auto def = make_tool(pool, t, policy);
+            if (auto lp = live_pins.find(origin);
+                lp != live_pins.end() && lp->second.contains(mcp_bare_name(t.name)))
+                def.always_expose = true;
+            out.push_back(std::move(def));
         }
         any_resources = !pool->registry.resources().empty() ||
                         !pool->registry.resource_templates().empty();
         any_prompts   = !pool->registry.prompts().empty();
     }
-    // mcp_search_tools / mcp_call are the on-demand discovery layer: they let
-    // the model find MCP tools that AREN'T shipped inline. They only earn
-    // their place when there are MORE direct MCP tools than the wire's inline
-    // budget (select_wire_tools caps external tools at kInlineBudget) —
-    // otherwise every MCP tool already ships inline and the meta-tools are
-    // pure overhead.
-    //
-    // They also actively BREAK the Anthropic OAuth (first-party) path: that
-    // endpoint validates the tool set against Claude Code's and rejects a
-    // client-defined tool-search capability with HTTP 400 ("third-party apps
-    // now draw from your extra usage") — taking down EVERY turn while any MCP
-    // server is configured. Isolated empirically: dropping just these two
-    // tools flips the request 400→200 with the direct MCP tools still
-    // present (see the acp A/B in the plugins investigation). So: expose
-    // them only when they're genuinely needed (direct count over budget),
-    // which is also exactly when the small-setup 400 can't happen.
-    constexpr std::size_t kInlineBudget = 16;
-    const std::size_t direct_mcp = out.size();
-    const bool need_search = direct_mcp > kInlineBudget;
-    if (need_search) {
-        out.push_back(make_search_tools_tool(pool));
-        out.push_back(make_call_tool(pool));
-    }
+    // Discovery of tools that aren't loaded is tools::plan's tool_search, which
+    // covers every non-native tool, not just MCP. Every MCP tool is directly
+    // callable by its own name, so no generic "call" tool is needed.
     if (any_resources) out.push_back(make_read_resource_tool(pool));
     if (any_prompts)   out.push_back(make_get_prompt_tool(pool));
 
-    // Budget enforcement: the wire must never carry more than the
-    // configured budget (AGENTTY_MCP_TOOL_BUDGET, default 100) total
-    // tools (native + MCP). Native tools are the core toolset and
-    // always ship; if native + these MCP tools exceed the cap, TRIM the MCP
-    // tail so the request stays within provider limits. The picker surfaces
-    // the same over-budget count (plugin_model) and lets the user disable
-    // some to make room — so a runaway plugin set degrades gracefully
-    // (fewer MCP tools) instead of failing the whole turn.
-    const std::size_t native = tools::native_registry().size();
-    const std::size_t budget = tool_budget();
-    // budget == 0 means "no cap" (same as the plugin_model guard below) —
-    // never trim, or env var 0 would silently drop every MCP tool.
-    if (budget > 0 && native + out.size() > budget) {
-        const std::size_t room = budget > native ? budget - native : 0;
-        if (out.size() > room) out.resize(room);
-    }
+    // No trim here. This is the CATALOG, which dispatch resolves names in;
+    // trimming it made a tool past the budget "unknown" even when the model
+    // called it by its exact name. What one request carries is decided per
+    // turn by tools::plan.
     // Passthrough tools ride OUTSIDE the budget trim: they are few,
     // user-declared one at a time, and mostly advertise=false (zero wire
     // cost — the proxy already put the schema on the wire).
@@ -1671,9 +1488,7 @@ std::vector<std::string> mcp_server_tools(const std::string& server) {
 
 PluginModel plugin_model() {
     PluginModel model;
-    model.tool_budget = tool_budget();
-
-    // Native tools always ship — count them for the budget math.
+    // Native tools always ship.
     model.native_tool_count = tools::native_registry().size();
 
     // Config: which servers exist, their command, and disabled tools.
@@ -1759,7 +1574,6 @@ PluginModel plugin_model() {
         return ok;
     };
     const scope::Approvals approvals = scope::load_approvals(kMcpApprovalsLeaf);
-    std::size_t enabled_mcp = 0;
     for (const auto& [name, cs] : cfg) {
         ServerState ss;
         ss.name    = name;
@@ -1846,6 +1660,7 @@ PluginModel plugin_model() {
                 ts.name        = lt.bare;
                 ts.description = lt.desc;
                 ts.enabled     = !cs.exclude.contains(lt.bare);
+                ts.pinned      = cs.pin.contains(lt.bare);
                 ss.tools.push_back(std::move(ts));
             }
         } else {
@@ -1881,45 +1696,12 @@ PluginModel plugin_model() {
         }
         std::sort(ss.tools.begin(), ss.tools.end(),
                   [](const ToolState& a, const ToolState& b){ return a.name < b.name; });
-        // Only a server that is actually ON THE WIRE (connected, not disabled)
-        // contributes to the tool budget. A disabled or not-yet-connected
-        // server's tools come from the s_seen CACHE for display only — they
-        // are not in the live pool and not sent to the model, so counting
-        // them would over-report "N tools on the wire" and steal budget,
-        // falsely flagging real enabled tools on OTHER servers as
-        // over-budget. (project_tools iterates the live pool, which never
-        // includes these, so this keeps the budget math in sync with reality.)
-        // Passthrough tools are dispatch-only (advertise=false — the proxy
-        // owns the wire schema), so they never consume wire budget; skip the
-        // count entirely. The rare advertise=true one rides outside the
-        // budget by design (see project_tools).
-        if (cs.type != "passthrough" && ss.connected && !ss.disabled)
-            enabled_mcp += ss.enabled_count();
         model.servers.push_back(std::move(ss));
     }
     std::sort(model.servers.begin(), model.servers.end(),
               [](const ServerState& a, const ServerState& b){ return a.name < b.name; });
-
-    // Budget: native always ship; enabled MCP fill the rest. Anything past
-    // the budget is trimmed (recorded), and the over-budget tools are
-    // flagged so the picker can mark them.
-    model.wire_tool_count = model.native_tool_count + enabled_mcp;
-    if (model.tool_budget > 0 && model.wire_tool_count > model.tool_budget) {
-        std::size_t room = model.tool_budget > model.native_tool_count
-            ? model.tool_budget - model.native_tool_count : 0;
-        std::size_t taken = 0;
-        for (auto& ss : model.servers) {
-            // Match the enabled_mcp accounting: only live wire tools can be
-            // trimmed / flagged over-budget. A cached disabled/disconnected
-            // server's tools aren't on the wire, so never flag them.
-            if (!ss.connected || ss.disabled) continue;
-            for (auto& ts : ss.tools)
-                if (ts.enabled) {
-                    if (taken < room) ++taken;
-                    else { ts.over_budget = true; ++model.trimmed_count; }
-                }
-        }
-    }
+    // Which tools load and which are on demand depends on the provider and
+    // the setting; tools::tool_loading::annotate fills that in for the UI.
     // Prompts for the composer's `/` menu, same hint shape ACP sends. They
     // show as `server:prompt`, which reads better and types faster than
     // the wire name `mcp__server__prompt`; both resolve to the same prompt.
